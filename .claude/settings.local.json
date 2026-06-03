@@ -15,7 +15,10 @@
       "mcp__supabase__get_publishable_keys",
       "mcp__supabase__apply_migration",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(gh auth *)",
+      "Bash(npm run *)",
+      "Bash(git remote *)"
     ]
   }
 }

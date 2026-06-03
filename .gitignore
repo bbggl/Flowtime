@@ -22,6 +22,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# TypeScript build info
+tsconfig.tsbuildinfo
+
 # Env files
 .env
 .env.local

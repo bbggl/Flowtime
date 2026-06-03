@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  Pencil,
 } from 'lucide-react'
 import { useTodoStore, usePomodoroStore, useNotesStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
@@ -91,9 +92,59 @@ function TodoProgressBar({ done, total }: { done: number; total: number }) {
 // Dashboard
 // ---------------------------------------------------------------------------
 
+const GREETING_CACHE_KEY = 'flowtime-greeting'
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
+
+  // --- Editable greeting ---
+  const [customGreeting, setCustomGreeting] = useState<string | null>(() => {
+    try { return localStorage.getItem(GREETING_CACHE_KEY) } catch { return null }
+  })
+  const [editingGreeting, setEditingGreeting] = useState(false)
+  const [greetingDraft, setGreetingDraft] = useState('')
+
+  // Load greeting from Supabase
+  useEffect(() => {
+    if (!isRealSupabase) return
+    supabase
+      .from('user_settings')
+      .select('greeting_text')
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error }: { data: any; error: any }) => {
+        if (!error && data?.greeting_text) {
+          setCustomGreeting(data.greeting_text)
+          localStorage.setItem(GREETING_CACHE_KEY, data.greeting_text)
+        }
+      })
+  }, [])
+
+  const saveGreeting = (text: string) => {
+    const trimmed = text.trim()
+    setCustomGreeting(trimmed || null)
+    setEditingGreeting(false)
+    if (trimmed) {
+      localStorage.setItem(GREETING_CACHE_KEY, trimmed)
+    } else {
+      localStorage.removeItem(GREETING_CACHE_KEY)
+    }
+    if (isRealSupabase) {
+      supabase
+        .from('user_settings')
+        .update({ greeting_text: trimmed || null })
+        .neq('user_id', '00000000-0000-0000-0000-000000000000')
+        .then(({ error }: { error: any }) => {
+          if (error) console.warn('Greeting save failed:', error.message)
+        })
+    }
+  }
+
+  const startEditGreeting = () => {
+    setGreetingDraft(customGreeting || `${greeting}，${displayName(user)}`)
+    setEditingGreeting(true)
+  }
 
   // Mount 时从 Supabase 加载数据
   useEffect(() => {
@@ -249,7 +300,7 @@ export default function Dashboard() {
         <Sparkles className="w-16 h-16 text-primary/40 dark:text-primary-dark/40" />
         <div className="text-center space-y-2">
           <p className="text-xl font-semibold text-light-text dark:text-dark-text">
-            {greeting}，{displayName(user)}
+            {customGreeting || `${greeting}，${displayName(user)}`}
           </p>
           <p className="text-light-text-secondary dark:text-dark-text-secondary max-w-xs">
             暂无数据，开始你的第一个番茄吧！
@@ -271,12 +322,34 @@ export default function Dashboard() {
   // -----------------------------------------------------------------------
   return (
     <div className="p-6 h-full">
-      {/* Greeting row */}
-      <div className="mb-5 flex items-center gap-3">
-        <GreetingIcon className="w-7 h-7 text-primary dark:text-primary-dark" />
-        <h1 className="text-xl font-bold text-light-text dark:text-dark-text">
-          {greeting}，{displayName(user)}
-        </h1>
+      {/* Greeting row — editable */}
+      <div className="mb-5 flex items-center gap-3 group/greet">
+        <GreetingIcon className="w-7 h-7 text-primary dark:text-primary-dark flex-shrink-0" />
+        {editingGreeting ? (
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={greetingDraft}
+              onChange={(e) => setGreetingDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveGreeting(greetingDraft)
+                if (e.key === 'Escape') setEditingGreeting(false)
+              }}
+              onBlur={() => saveGreeting(greetingDraft)}
+              placeholder="输入自定义标题..."
+              className="text-xl font-bold bg-transparent border-b-2 border-primary dark:border-primary-dark text-light-text dark:text-dark-text outline-none py-0.5 w-full max-w-sm"
+            />
+          </div>
+        ) : (
+          <h1
+            onClick={startEditGreeting}
+            className="text-xl font-bold text-light-text dark:text-dark-text cursor-pointer hover:text-primary dark:hover:text-primary-dark transition-colors select-none flex items-center gap-2"
+            title="点击编辑标题"
+          >
+            {customGreeting || `${greeting}，${displayName(user)}`}
+            <Pencil className="w-4 h-4 opacity-0 group-hover/greet:opacity-40 transition-opacity flex-shrink-0" />
+          </h1>
+        )}
       </div>
 
       {/* Bento grid */}
@@ -292,7 +365,7 @@ export default function Dashboard() {
             })}
           </p>
           <p className="text-lg font-semibold text-light-text dark:text-dark-text">
-            {greeting}，{displayName(user)}
+            {customGreeting || `${greeting}，${displayName(user)}`}
           </p>
           <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary mt-1">
             今天也是专注的一天

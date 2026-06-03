@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Sun,
@@ -12,15 +12,8 @@ import {
   PenTool,
   Sparkles,
 } from 'lucide-react'
-import { createTodoStore } from '../stores/useTodoStore'
-import { createPomodoroStore } from '../stores/usePomodoroStore'
-import { createNotesStore } from '../stores/useNotesStore'
+import { useTodoStore, usePomodoroStore, useNotesStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
-
-// Module-level store instances so state is shared across re-renders
-const useTodoStore = createTodoStore(null)
-const usePomodoroStore = createPomodoroStore(null)
-const useNotesStore = createNotesStore(null)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -129,6 +122,13 @@ function TodoProgressBar({ done, total }: { done: number; total: number }) {
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
+
+  // Mount 时从 Supabase 加载数据
+  useEffect(() => {
+    useTodoStore.getState().loadTodos()
+    usePomodoroStore.getState().loadRecords()
+    useNotesStore.getState().loadNotes()
+  }, [])
 
   const todos = useTodoStore((s) => s.todos)
   const completedCount = usePomodoroStore((s) => s.completedCount)

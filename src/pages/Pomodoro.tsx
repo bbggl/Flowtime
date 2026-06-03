@@ -1,24 +1,19 @@
-import { useRef, useState, useCallback, useMemo } from 'react'
-import { Play, Pause, SkipForward, RotateCcw } from 'lucide-react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { Play, Pause, SkipForward, RotateCcw, Check } from 'lucide-react'
 import { useStore } from 'zustand'
-import { usePomodoroTimer } from '../hooks/usePomodoroTimer'
-import { createPomodoroStore, type PomodoroMode } from '../stores/usePomodoroStore'
-import { createTodoStore } from '../stores/useTodoStore'
+import { useTodoStore, usePomodoroStore } from '../stores'
+import { type PomodoroMode } from '../stores/usePomodoroStore'
 import { formatTime } from '../utils/time'
 import type { Todo } from '../types'
 
-// ── Mode config ──────────────────────────────────────────────────────────────
-const MODES: { key: PomodoroMode; label: string; minutes: number }[] = [
-  { key: 'work', label: '工作', minutes: 25 },
-  { key: 'short_break', label: '短休', minutes: 5 },
-  { key: 'long_break', label: '长休', minutes: 15 },
-]
-
-const MODE_DURATIONS: Record<PomodoroMode, number> = {
-  work: 25 * 60,
-  short_break: 5 * 60,
-  long_break: 15 * 60,
+// ── Mode labels (key → display name) ────────────────────────────────────────
+const MODE_LABELS: Record<PomodoroMode, string> = {
+  work: '工作',
+  short_break: '短休',
+  long_break: '长休',
 }
+
+const MODE_ORDER: PomodoroMode[] = ['work', 'short_break', 'long_break']
 
 // ── SVG ring constants ───────────────────────────────────────────────────────
 const VIEWBOX = 100
@@ -41,30 +36,95 @@ const RING_COLORS: Record<PomodoroMode, { track: string; progress: string }> = {
   },
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function totalDurationForMode(mode: PomodoroMode): number {
-  return MODE_DURATIONS[mode]
+// ── Sound ────────────────────────────────────────────────────────────────────
+let audioCtx: AudioContext | null = null
+
+function playBeep() {
+  try {
+    if (!audioCtx) audioCtx = new AudioContext()
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.connect(gain)
+    gain.connect(audioCtx.destination)
+    osc.type = 'sine'
+
+    // 三连音：C5 → E5 → G5
+    const now = audioCtx.currentTime
+    const notes = [523.25, 659.25, 783.99]
+    notes.forEach((freq, i) => {
+      osc.frequency.setValueAtTime(freq, now + i * 0.15)
+    })
+    gain.gain.setValueAtTime(0.15, now)
+    gain.gain.linearRampToValueAtTime(0, now + 0.6)
+
+    osc.start(now)
+    osc.stop(now + 0.6)
+  } catch {
+    // 浏览器不支持 Web Audio，静默忽略
+  }
 }
 
-function computeProgress(remainingSeconds: number, mode: PomodoroMode): number {
-  const total = totalDurationForMode(mode)
+function shouldPlaySound(): boolean {
+  // 优先读 store（从 Supabase 加载的持久化值），回退 localStorage
+  const storeVal = usePomodoroStore.getState().soundEnabled
+  if (storeVal !== undefined) return storeVal
+  return localStorage.getItem('flowtime-sound') !== 'false'
+}
+
+// ── Notification ─────────────────────────────────────────────────────────────
+async function sendNotification(title: string, body: string) {
+  const storeVal = usePomodoroStore.getState().notificationEnabled
+  const enabled = storeVal !== undefined ? storeVal : localStorage.getItem('flowtime-notification') !== 'false'
+  if (!enabled) return
+  if (!('Notification' in window)) return
+
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '/vite.svg' })
+  } else if (Notification.permission === 'default') {
+    const perm = await Notification.requestPermission()
+    if (perm === 'granted') {
+      new Notification(title, { body, icon: '/vite.svg' })
+    }
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function computeProgress(remainingSeconds: number, total: number): number {
   if (total <= 0) return 0
   return 1 - remainingSeconds / total
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function Pomodoro() {
-  const pomodoroStoreRef = useRef(createPomodoroStore({}))
-  const todoStoreRef = useRef(createTodoStore({}))
+  // 计时引擎已提升到 Layout，此处直接读 store（切换页面不中断）
+  const mode = useStore(usePomodoroStore, (s) => s.mode)
+  const status = useStore(usePomodoroStore, (s) => s.status)
+  const remainingSeconds = useStore(usePomodoroStore, (s) => s.remainingSeconds)
+  const linkedTaskId = useStore(usePomodoroStore, (s) => s.linkedTaskId)
+  const linkedTaskTitle = useStore(usePomodoroStore, (s) => s.linkedTaskTitle)
+  const taskCompletedPomos = useStore(usePomodoroStore, (s) => s.taskCompletedPomos)
+  const records = useStore(usePomodoroStore, (s) => s.records)
+  const completedCount = useStore(usePomodoroStore, (s) => s.completedCount)
+  const storeWorkDuration = useStore(usePomodoroStore, (s) => s.workDuration)
+  const storeShortBreakDuration = useStore(usePomodoroStore, (s) => s.shortBreakDuration)
+  const storeLongBreakDuration = useStore(usePomodoroStore, (s) => s.longBreakDuration)
+  const allTodos = useStore(useTodoStore, (s) => s.todos)
+  const formattedTime = useMemo(() => formatTime(remainingSeconds), [remainingSeconds])
 
-  const store = pomodoroStoreRef.current
-  const todoStore = todoStoreRef.current
+  // Mount 时从 Supabase 加载番茄记录
+  useEffect(() => {
+    usePomodoroStore.getState().loadRecords()
+  }, [])
 
-  const timer = usePomodoroTimer(store)
-
-  const taskCompletedPomos = useStore(store, (s) => s.taskCompletedPomos)
-  const records = useStore(store, (s) => s.records)
-  const allTodos = useStore(todoStore, (s) => s.todos)
+  // 动态时长 → mode 按钮显示和进度计算
+  const modeDurations = useMemo(
+    (): Record<PomodoroMode, number> => ({
+      work: storeWorkDuration,
+      short_break: storeShortBreakDuration,
+      long_break: storeLongBreakDuration,
+    }),
+    [storeWorkDuration, storeShortBreakDuration, storeLongBreakDuration],
+  )
 
   const todayFocusTime = useMemo(() => {
     return records
@@ -78,20 +138,122 @@ export default function Pomodoro() {
   )
 
   const [taskDropdownOpen, setTaskDropdownOpen] = useState(false)
+  const [flashRing, setFlashRing] = useState(false)
+  const [showLongBreakTip, setShowLongBreakTip] = useState(false)
+  const dismissedBreakCountRef = useRef<number>(-1)
 
-  const isRunning = timer.status === 'running'
-  const isPaused = timer.status === 'paused'
-  const isFinished = timer.status === 'finished'
+  // ── Hold-to-confirm for skip / reset ────────────────────────────────────
+  const HOLD_MS = 2000
+  const holdTargetRef = useRef<'skip' | 'reset' | null>(null)
+  const holdTimerRef = useRef<number>(0)
+  const holdStartRef = useRef<number>(0)
+  const [holdProgress, setHoldProgress] = useState(0) // 0..1
+  const [confirmedAction, setConfirmedAction] = useState<'skip' | 'reset' | null>(null)
 
-  const progress = computeProgress(timer.remainingSeconds, timer.mode)
+  const startHold = useCallback((action: 'skip' | 'reset') => {
+    // 禁止在不允许的状态下触发长按（兜底 disabled attribute 的浏览器不一致行为）
+    if (action === 'skip' && (status === 'idle' || status === 'finished')) return
+    if (action === 'reset' && status === 'idle') return
+
+    holdTargetRef.current = action
+    holdStartRef.current = Date.now()
+    setHoldProgress(0)
+
+    const tick = () => {
+      const elapsed = Date.now() - holdStartRef.current
+      const pct = Math.min(elapsed / HOLD_MS, 1)
+      setHoldProgress(pct)
+      if (pct >= 1) {
+        setConfirmedAction(action)
+        setHoldProgress(0)
+        holdTargetRef.current = null
+      } else {
+        holdTimerRef.current = requestAnimationFrame(tick)
+      }
+    }
+    holdTimerRef.current = requestAnimationFrame(tick)
+  }, [status])
+
+  const cancelHold = useCallback(() => {
+    if (holdTimerRef.current) cancelAnimationFrame(holdTimerRef.current)
+    holdTargetRef.current = null
+    setHoldProgress(0)
+  }, [])
+
+  // Fire confirmed action after a short visual flash
+  useEffect(() => {
+    if (!confirmedAction) return
+    const id = setTimeout(() => {
+      if (confirmedAction === 'skip') {
+        usePomodoroStore.getState().skip()
+      } else {
+        usePomodoroStore.getState().reset()
+      }
+      setConfirmedAction(null)
+    }, 200)
+    return () => clearTimeout(id)
+  }, [confirmedAction])
+
+  const isRunning = status === 'running'
+  const isPaused = status === 'paused'
+  const isFinished = status === 'finished'
+
+  const total = modeDurations[mode]
+  const progress = computeProgress(remainingSeconds, total)
   const dashOffset = CIRCUMFERENCE * progress
-  const ringColors = RING_COLORS[timer.mode]
+  const ringColors = RING_COLORS[mode]
+
+  // ── Detect finished transition → sound + notification + flash ────────────
+  const prevStatusRef = useRef(status)
+
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    prevStatusRef.current = status
+
+    if (prev !== 'finished' && status === 'finished') {
+      // 环闪动效
+      setFlashRing(true)
+      setTimeout(() => setFlashRing(false), 1200)
+
+      // 音效
+      if (shouldPlaySound()) {
+        playBeep()
+      }
+
+      // 浏览器通知（仅工作完成时）
+      if (mode === 'work') {
+        sendNotification(
+          '🍅 番茄完成！',
+          `已完成 ${completedCount} 个番茄，继续加油！`,
+        )
+      }
+    }
+  }, [status, mode, completedCount])
+
+  // ── Long break suggestion after N work completions ──────────────────────
+  useEffect(() => {
+    const suggest = usePomodoroStore.getState().shouldSuggestLongBreak()
+    if (suggest && mode === 'work' && status === 'finished' && completedCount !== dismissedBreakCountRef.current) {
+      setShowLongBreakTip(true)
+    }
+  }, [completedCount, mode, status])
+
+  const handleAcceptLongBreak = useCallback(() => {
+    dismissedBreakCountRef.current = completedCount
+    setShowLongBreakTip(false)
+    usePomodoroStore.getState().setMode('long_break')
+  }, [completedCount])
+
+  const handleDismissLongBreakTip = useCallback(() => {
+    dismissedBreakCountRef.current = completedCount
+    setShowLongBreakTip(false)
+  }, [completedCount])
 
   // ── Linked task info ─────────────────────────────────────────────────────
   const linkedTodo: Todo | undefined =
-    timer.linkedTaskId
-      ? pendingTodos.find((t) => t.id === timer.linkedTaskId) ??
-        todoStore.getState().todos.find((t) => t.id === timer.linkedTaskId)
+    linkedTaskId
+      ? pendingTodos.find((t) => t.id === linkedTaskId) ??
+        useTodoStore.getState().todos.find((t) => t.id === linkedTaskId)
       : undefined
 
   const estimatedPomos = linkedTodo?.estimated_pomos ?? 0
@@ -102,49 +264,78 @@ export default function Pomodoro() {
 
   const handleSelectTask = useCallback(
     (todo: Todo) => {
-      timer.linkTask(todo.id, todo.title)
+      usePomodoroStore.getState().linkTask(todo.id, todo.title)
       setTaskDropdownOpen(false)
     },
-    [timer],
+    [],
   )
 
   const handleUnlinkTask = useCallback(() => {
-    timer.unlinkTask()
-  }, [timer])
+    usePomodoroStore.getState().unlinkTask()
+  }, [])
 
   // ── Start / Pause / Resume ──────────────────────────────────────────────
   const handleToggleRun = useCallback(() => {
-    if (isRunning) {
-      timer.pause()
+    if (isFinished) {
+      // 完成后点按钮：重置到初始状态
+      usePomodoroStore.getState().reset()
+    } else if (isRunning) {
+      usePomodoroStore.getState().pause()
     } else if (isPaused) {
-      timer.resume()
+      usePomodoroStore.getState().resume()
     } else {
-      timer.start()
+      usePomodoroStore.getState().start()
     }
-  }, [isRunning, isPaused, timer])
+  }, [isRunning, isPaused, isFinished])
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col items-center px-6 py-8 min-h-full">
+      {/* ── Long break suggestion banner ──────────────────────────────────── */}
+      {showLongBreakTip && (
+        <div className="w-full max-w-sm mb-6 px-4 py-3 rounded-xl bg-accent/10 dark:bg-accent-dark/10 border border-accent/30 dark:border-accent-dark/30 flex items-center justify-between gap-3">
+          <p className="text-sm text-accent dark:text-accent-dark font-medium">
+            🎉 已完成 {completedCount} 个番茄！来一次长休息吧？
+          </p>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={handleAcceptLongBreak}
+              className="px-3 py-1 text-xs font-medium rounded-lg bg-accent dark:bg-accent-dark text-white hover:opacity-90 transition-opacity"
+            >
+              长休
+            </button>
+            <button
+              onClick={handleDismissLongBreakTip}
+              className="px-3 py-1 text-xs font-medium rounded-lg border border-accent/30 dark:border-accent-dark/30 text-accent dark:text-accent-dark hover:bg-accent/10 dark:hover:bg-accent-dark/10 transition-colors"
+            >
+              跳过
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Mode switch ────────────────────────────────────────────────── */}
       <div className="flex gap-2 mb-8">
-        {MODES.map((m) => (
+        {MODE_ORDER.map((key) => (
           <button
-            key={m.key}
-            onClick={() => timer.setMode(m.key)}
+            key={key}
+            onClick={() => {
+              usePomodoroStore.getState().setMode(key)
+              setShowLongBreakTip(false)
+            }}
             disabled={isRunning}
             className={`
               px-5 py-2 rounded-full text-sm font-medium transition-colors
               disabled:opacity-60
               ${
-                timer.mode === m.key
+                mode === key
                   ? 'bg-primary text-white dark:bg-primary-dark dark:text-dark-bg'
                   : 'bg-light-card dark:bg-dark-card text-light-text-secondary dark:text-dark-text-secondary border border-light-border dark:border-dark-border'
               }
             `}
           >
-            {m.label}
-            <span className="ml-1 opacity-70">{m.minutes}min</span>
+            {MODE_LABELS[key]}
+            <span className="ml-1 opacity-70">{Math.round(modeDurations[key] / 60)}min</span>
           </button>
         ))}
       </div>
@@ -153,7 +344,7 @@ export default function Pomodoro() {
       <div className="relative mb-8">
         <svg
           viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}
-          className="w-72 h-72 -rotate-90"
+          className={`w-72 h-72 -rotate-90 ${flashRing ? 'animate-pulse' : ''}`}
         >
           {/* Background track */}
           <circle
@@ -163,7 +354,7 @@ export default function Pomodoro() {
             fill="none"
             stroke="currentColor"
             strokeWidth={STROKE_WIDTH}
-            className={ringColors.track}
+            className={`${ringColors.track} transition-colors ${flashRing ? 'opacity-30' : ''}`}
           />
           {/* Progress arc */}
           <circle
@@ -183,24 +374,55 @@ export default function Pomodoro() {
         {/* Center time display */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-6xl font-mono font-bold tracking-tight text-light-text dark:text-dark-text">
-            {timer.formattedTime}
+            {isFinished ? '00:00' : formattedTime}
           </span>
+          {isFinished && (
+            <span className="mt-1 text-sm font-medium text-primary dark:text-primary-dark animate-pulse">
+              {mode === 'work' ? '完成！' : '休息结束'}
+            </span>
+          )}
         </div>
       </div>
 
       {/* ── Control buttons ────────────────────────────────────────────── */}
       <div className="flex items-center gap-10 mb-8">
-        {/* Skip */}
+        {/* Skip — hold 2s to complete pomodoro */}
         <button
-          onClick={timer.skip}
-          disabled={timer.status === 'idle' || isFinished}
-          className="text-sm font-medium text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text dark:hover:text-dark-text disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          onPointerDown={() => startHold('skip')}
+          onPointerUp={cancelHold}
+          onPointerLeave={cancelHold}
+          onPointerCancel={cancelHold}
+          disabled={status === 'idle' || isFinished}
+          className="relative text-sm font-medium text-light-text-secondary dark:text-dark-text-secondary hover:text-emerald-600 dark:hover:text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors select-none"
         >
-          <SkipForward className="w-5 h-5 mx-auto mb-1" />
-          跳过
+          <div className="relative mx-auto w-5 h-5 mb-1">
+            {confirmedAction === 'skip' ? (
+              <Check className="w-5 h-5 text-emerald-500" />
+            ) : (
+              <SkipForward className="w-5 h-5" />
+            )}
+            {/* hold progress ring */}
+            {holdTargetRef.current === 'skip' && (
+              <svg
+                className="absolute -rotate-90"
+                style={{ width: 28, height: 28, top: -4, left: -4 }}
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                <circle
+                  cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeDasharray={2 * Math.PI * 10}
+                  strokeDashoffset={2 * Math.PI * 10 * (1 - holdProgress)}
+                  strokeLinecap="round"
+                  className="text-emerald-500"
+                />
+              </svg>
+            )}
+          </div>
+          {holdTargetRef.current === 'skip' ? '按住…' : '完成'}
         </button>
 
-        {/* Start / Pause circle */}
+        {/* Start / Pause / Replay circle */}
         <button
           onClick={handleToggleRun}
           className={`
@@ -208,23 +430,51 @@ export default function Pomodoro() {
             bg-primary dark:bg-primary-dark text-white
             hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-primary/30 dark:shadow-primary-dark/30
           `}
-          aria-label={isRunning ? '暂停' : isPaused ? '继续' : '开始'}
+          aria-label={isRunning ? '暂停' : isPaused ? '继续' : isFinished ? '重新开始' : '开始'}
         >
           {isRunning ? (
             <Pause className="w-8 h-8" />
+          ) : isFinished ? (
+            <RotateCcw className="w-8 h-8" />
           ) : (
             <Play className="w-8 h-8 ml-1" />
           )}
         </button>
 
-        {/* Reset */}
+        {/* Reset — hold 2s to abandon */}
         <button
-          onClick={timer.reset}
-          disabled={timer.status === 'idle'}
-          className="text-sm font-medium text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text dark:hover:text-dark-text disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          onPointerDown={() => startHold('reset')}
+          onPointerUp={cancelHold}
+          onPointerLeave={cancelHold}
+          onPointerCancel={cancelHold}
+          disabled={status === 'idle'}
+          className="relative text-sm font-medium text-light-text-secondary dark:text-dark-text-secondary hover:text-red-500 dark:hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors select-none"
         >
-          <RotateCcw className="w-5 h-5 mx-auto mb-1" />
-          重置
+          <div className="relative mx-auto w-5 h-5 mb-1">
+            {confirmedAction === 'reset' ? (
+              <Check className="w-5 h-5 text-red-500" />
+            ) : (
+              <RotateCcw className="w-5 h-5" />
+            )}
+            {/* hold progress ring */}
+            {holdTargetRef.current === 'reset' && (
+              <svg
+                className="absolute -rotate-90"
+                style={{ width: 28, height: 28, top: -4, left: -4 }}
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                <circle
+                  cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeDasharray={2 * Math.PI * 10}
+                  strokeDashoffset={2 * Math.PI * 10 * (1 - holdProgress)}
+                  strokeLinecap="round"
+                  className="text-red-500"
+                />
+              </svg>
+            )}
+          </div>
+          {holdTargetRef.current === 'reset' ? '按住…' : '放弃'}
         </button>
       </div>
 
@@ -234,11 +484,11 @@ export default function Pomodoro() {
           onClick={handleToggleTaskDropdown}
           className="w-full text-left px-4 py-3 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border hover:border-primary/40 dark:hover:border-primary-dark/40 transition-colors"
         >
-          {timer.linkedTaskId ? (
+          {linkedTaskId ? (
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-light-text dark:text-dark-text truncate">
-                  {timer.linkedTaskTitle}
+                  {linkedTaskTitle}
                 </p>
                 <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-0.5">
                   🍅 {taskCompletedPomos}/{estimatedPomos}
@@ -275,7 +525,7 @@ export default function Pomodoro() {
                   onClick={() => handleSelectTask(todo)}
                   className={`
                     w-full text-left px-4 py-3 text-sm hover:bg-light-bg dark:hover:bg-dark-bg transition-colors
-                    ${todo.id === timer.linkedTaskId ? 'bg-light-bg dark:bg-dark-bg' : ''}
+                    ${todo.id === linkedTaskId ? 'bg-light-bg dark:bg-dark-bg' : ''}
                   `}
                 >
                   <span className="text-light-text dark:text-dark-text">
@@ -297,7 +547,7 @@ export default function Pomodoro() {
       <div className="mt-6 flex items-center gap-2 text-sm text-light-text-secondary dark:text-dark-text-secondary">
         <span>🍅</span>
         <span className="font-medium text-light-text dark:text-dark-text">
-          {timer.completedCount}
+          {completedCount}
         </span>
         <span>次完成</span>
         <span className="mx-1">·</span>

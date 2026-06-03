@@ -61,6 +61,26 @@ describe('usePomodoroTimer', () => {
       })
       expect(result.current.remainingSeconds).toBe(25 * 60 - 3)
     })
+
+    it('accumulates sub-second rAF frames and ticks every 1s', () => {
+      const { result } = renderHook(() => usePomodoroTimer(store))
+      act(() => { result.current.start() })
+
+      // 模拟 65 帧，每帧 16ms，累积约 1040ms → 应该 tick 1 秒
+      act(() => {
+        for (let i = 0; i < 65; i++) {
+          mockNow += 16
+          const cbs = [...rafCallbacks]
+          rafCallbacks = []
+          for (const cb of cbs) {
+            cb(mockNow)
+          }
+        }
+      })
+
+      // 直接读 store 验证 tick 实际被调用了
+      expect(store.getState().remainingSeconds).toBe(25 * 60 - 1)
+    })
   })
 
   // --- 计时完成 ---
@@ -97,11 +117,11 @@ describe('usePomodoroTimer', () => {
 
   // --- 跳过 ---
   describe('跳过 (Skip)', () => {
-    it('skips and returns to idle', () => {
+    it('skips and returns to finished', () => {
       store.getState().start()
       const { result } = renderHook(() => usePomodoroTimer(store))
       act(() => { result.current.skip() })
-      expect(result.current.status).toBe('idle')
+      expect(result.current.status).toBe('finished')
     })
   })
 

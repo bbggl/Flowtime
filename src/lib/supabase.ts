@@ -1,10 +1,9 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-export const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
-function createDummyClient() {
+function createDummyClient(): SupabaseClient {
   const mockUser = {
     id: 'demo-user',
     email: 'demo@flowtime.app',
@@ -12,31 +11,39 @@ function createDummyClient() {
     app_metadata: {},
     aud: '',
     created_at: '',
+    role: '',
   }
+  const mockAuth = {
+    getSession: () =>
+      Promise.resolve({ data: { session: { user: mockUser } }, error: null }) as any,
+    onAuthStateChange: () =>
+      ({ data: { subscription: { unsubscribe: () => {} } } }) as any,
+    signUp: () =>
+      Promise.resolve({ data: { user: mockUser, session: null }, error: null }) as any,
+    signInWithPassword: () =>
+      Promise.resolve({ data: { user: mockUser, session: {} }, error: null }) as any,
+    signOut: () => Promise.resolve({ error: null }),
+  }
+  const mockQueryBuilder = {
+    select: () => mockQueryBuilder,
+    insert: () => mockQueryBuilder,
+    update: () => mockQueryBuilder,
+    delete: () => mockQueryBuilder,
+    eq: () => mockQueryBuilder,
+    order: () => mockQueryBuilder,
+    limit: () => mockQueryBuilder,
+    single: () => Promise.resolve({ data: null, error: null }),
+    then: (resolve: any) => resolve({ data: [], error: null }),
+  }
+
   return {
-    auth: {
-      getSession: () =>
-        Promise.resolve({ data: { session: { user: mockUser } }, error: null }) as any,
-      onAuthStateChange: () =>
-        ({ data: { subscription: { unsubscribe: () => {} } } }) as any,
-      signUp: (_credentials: { email: string; password: string }) =>
-        Promise.resolve({ data: { user: mockUser }, error: null }) as any,
-      signInWithPassword: (_credentials: { email: string; password: string }) =>
-        Promise.resolve({ data: { user: mockUser }, error: null }) as any,
-      signOut: () => Promise.resolve({ error: null }),
-    },
-    from: () => ({
-      select: () => ({
-        eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }),
-        order: () => Promise.resolve({ data: [], error: null }),
-      }),
-      insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: null }) }) }),
-      update: () => ({ eq: () => Promise.resolve({ data: null, error: null }) }),
-      delete: () => ({ eq: () => Promise.resolve({ data: null, error: null }) }),
-    }),
-  } as any
+    auth: mockAuth,
+    from: () => mockQueryBuilder,
+  } as unknown as SupabaseClient
 }
 
-export const supabase = supabaseConfigured
+const isConfigured = Boolean(supabaseUrl && supabaseAnonKey)
+
+export const supabase: SupabaseClient = isConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : createDummyClient()

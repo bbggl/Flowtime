@@ -1,6 +1,6 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useEffect, useState } from 'react'
 import { useStore } from 'zustand'
-import { createStatsStore } from '../stores/useStatsStore'
+import { useStatsStore, usePomodoroStore, useTodoStore } from '../stores'
 import { Granularity } from '../utils/stats'
 import type { Granularity as GranularityType } from '../utils/stats'
 import type { PomodoroRecord } from '../types'
@@ -16,8 +16,6 @@ import {
   Cell,
 } from 'recharts'
 import { Clock, CheckCircle2, TrendingUp, Target } from 'lucide-react'
-
-const statsStore = createStatsStore()
 
 // ── Constants ──
 
@@ -46,27 +44,27 @@ function getWeekOfMonth(d: Date): number {
 
 interface TrendPoint {
   label: string
-  minutes: number
+  value: number
 }
 
-function computeTrendData(
-  records: PomodoroRecord[],
-  granularity: GranularityType,
-): TrendPoint[] {
+function accumulate(records: PomodoroRecord[], granularity: GranularityType, useCount: boolean) {
   const workRecords = records.filter(
     (r) => r.mode === 'work' && r.status === 'completed',
   )
+  // count mode: each record = 1; duration mode: sum actual_duration
+  const addValue = (buckets: number[], idx: number, r: PomodoroRecord) => {
+    buckets[idx] += useCount ? 1 : r.actual_duration
+  }
 
   switch (granularity) {
     case Granularity.Day: {
       const buckets = new Array<number>(24).fill(0)
       for (const r of workRecords) {
-        const hour = new Date(r.started_at).getHours()
-        buckets[hour] += r.actual_duration
+        addValue(buckets, new Date(r.started_at).getHours(), r)
       }
-      return buckets.map((secs, i) => ({
+      return buckets.map((v, i) => ({
         label: `${String(i).padStart(2, '0')}:00`,
-        minutes: Math.round(secs / 60),
+        value: useCount ? v : Math.round(v / 60),
       }))
     }
     case Granularity.Week: {
@@ -74,26 +72,27 @@ function computeTrendData(
       const buckets = new Array<number>(7).fill(0)
       for (const r of workRecords) {
         const d = new Date(r.started_at)
-        const dayOfWeek = d.getDay() // 0 = Sunday
+        const dayOfWeek = d.getDay()
         const idx = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-        buckets[idx] += r.actual_duration
+        addValue(buckets, idx, r)
       }
-      return buckets.map((secs, i) => ({
+      return buckets.map((v, i) => ({
         label: dayNames[i],
-        minutes: Math.round(secs / 60),
+        value: useCount ? v : Math.round(v / 60),
       }))
     }
     case Granularity.Month: {
       const weekMap = new Map<number, number>()
       for (const r of workRecords) {
         const week = getWeekOfMonth(new Date(r.started_at))
-        weekMap.set(week, (weekMap.get(week) ?? 0) + r.actual_duration)
+        const prev = weekMap.get(week) ?? 0
+        weekMap.set(week, prev + (useCount ? 1 : r.actual_duration))
       }
       return Array.from(weekMap.entries())
         .sort(([a], [b]) => a - b)
-        .map(([week, secs]) => ({
+        .map(([week, v]) => ({
           label: `第${week}周`,
-          minutes: Math.round(secs / 60),
+          value: useCount ? v : Math.round(v / 60),
         }))
     }
     case Granularity.Year: {
@@ -103,15 +102,22 @@ function computeTrendData(
       ]
       const buckets = new Array<number>(12).fill(0)
       for (const r of workRecords) {
-        const month = new Date(r.started_at).getMonth()
-        buckets[month] += r.actual_duration
+        addValue(buckets, new Date(r.started_at).getMonth(), r)
       }
-      return buckets.map((secs, i) => ({
+      return buckets.map((v, i) => ({
         label: monthNames[i],
-        minutes: Math.round(secs / 60),
+        value: useCount ? v : Math.round(v / 60),
       }))
     }
   }
+}
+
+function computeTrendData(
+  records: PomodoroRecord[],
+  granularity: GranularityType,
+  mode: 'duration' | 'count',
+): TrendPoint[] {
+  return accumulate(records, granularity, mode === 'count')
 }
 
 // ── Task distribution ──
@@ -123,7 +129,10 @@ interface TaskDistItem {
   color: string
 }
 
-function computeTaskDistribution(records: PomodoroRecord[]): TaskDistItem[] {
+function computeTaskDistribution(
+  records: PomodoroRecord[],
+  todoNames: Map<string, string>,
+): TaskDistItem[] {
   const workRecords = records.filter(
     (r) => r.mode === 'work' && r.status === 'completed',
   )
@@ -138,7 +147,9 @@ function computeTaskDistribution(records: PomodoroRecord[]): TaskDistItem[] {
   const sorted = Array.from(taskMap.entries())
     .map(([key, totalDuration]) => ({
       key,
-      name: key === '__no_task__' ? '无任务' : key,
+      name: key === '__no_task__'
+        ? '自由专注'
+        : (todoNames.get(key) ?? '已删除的任务'),
       totalDuration,
     }))
     .sort((a, b) => b.totalDuration - a.totalDuration)
@@ -171,18 +182,42 @@ function computeTaskDistribution(records: PomodoroRecord[]): TaskDistItem[] {
 // ── Component ──
 
 export default function Stats() {
-  const granularity = useStore(statsStore, (s) => s.granularity)
-  const records = useStore(statsStore, (s) => s.records)
+  const granularity = useStore(useStatsStore, (s) => s.granularity)
+  const records = useStore(useStatsStore, (s) => s.records)
+
+  // Mount 时从 Supabase 加载番茄记录和待办（任务分布需要 todo 名称）
+  useEffect(() => {
+    Promise.all([
+      usePomodoroStore.getState().loadRecords(),
+      useTodoStore.getState().loadTodos(),
+    ]).then(() => {
+      const pomoRecords = usePomodoroStore.getState().records
+      useStatsStore.getState().setRecords(pomoRecords)
+    })
+  }, [])
+
+  // Build todo id → name lookup map
+  const allTodos = useStore(useTodoStore, (s) => s.todos)
+  const todoNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const t of allTodos) {
+      map.set(t.id, t.title)
+    }
+    return map
+  }, [allTodos])
+
+  // Trend toggle: count vs duration
+  const [trendMode, setTrendMode] = useState<'duration' | 'count'>('duration')
 
   // Derived data
   const trendData = useMemo(
-    () => computeTrendData(records, granularity),
-    [records, granularity],
+    () => computeTrendData(records, granularity, trendMode),
+    [records, granularity, trendMode],
   )
 
   const taskDistribution = useMemo(
-    () => computeTaskDistribution(records),
-    [records],
+    () => computeTaskDistribution(records, todoNames),
+    [records, todoNames],
   )
 
   const summary = useMemo(() => {
@@ -206,11 +241,11 @@ export default function Stats() {
   }, [records])
 
   const hasRecords = records.length > 0
-  const hasTrendData = trendData.some((d) => d.minutes > 0)
+  const hasTrendData = trendData.some((d) => d.value > 0)
   const hasTaskData = taskDistribution.length > 0
 
   const handleGranularityChange = useCallback((g: GranularityType) => {
-    statsStore.getState().setGranularity(g)
+    useStatsStore.getState().setGranularity(g)
   }, [])
 
   // ── Shared class strings ──
@@ -304,7 +339,32 @@ export default function Stats() {
 
       {/* ── Trend chart ── */}
       <div className={cardClass + ' mb-6'}>
-        <h2 className={sectionTitleClass}>专注趋势</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className={sectionTitleClass + ' mb-0'}>专注趋势</h2>
+          {/* Count / Duration toggle */}
+          <div className="flex items-center gap-1 bg-light-bg dark:bg-dark-bg rounded-lg p-0.5">
+            <button
+              onClick={() => setTrendMode('count')}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                trendMode === 'count'
+                  ? 'bg-primary text-white'
+                  : 'text-light-text-secondary dark:text-dark-text-secondary'
+              }`}
+            >
+              次数
+            </button>
+            <button
+              onClick={() => setTrendMode('duration')}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                trendMode === 'duration'
+                  ? 'bg-primary text-white'
+                  : 'text-light-text-secondary dark:text-dark-text-secondary'
+              }`}
+            >
+              时长
+            </button>
+          </div>
+        </div>
         {!hasRecords ? (
           <div className="flex items-center justify-center h-48 text-sm text-light-text-secondary dark:text-dark-text-secondary">
             暂无专注记录
@@ -328,6 +388,8 @@ export default function Stats() {
                 axisLine={false}
                 tickLine={false}
                 width={40}
+                domain={[0, 'auto']}
+                allowDecimals={false}
               />
               <Tooltip
                 contentStyle={{
@@ -336,10 +398,13 @@ export default function Stats() {
                   backgroundColor: '#FFFFFF',
                   fontSize: 13,
                 }}
-                formatter={(value: number) => [`${value} 分钟`, '专注时长']}
+                formatter={(value: number) => [
+                  trendMode === 'count' ? `${value} 次` : `${value} 分钟`,
+                  trendMode === 'count' ? '专注次数' : '专注时长',
+                ]}
               />
               <Bar
-                dataKey="minutes"
+                dataKey="value"
                 fill="#8B5CF6"
                 radius={[4, 4, 0, 0]}
                 maxBarSize={48}

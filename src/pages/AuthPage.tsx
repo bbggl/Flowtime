@@ -8,6 +8,7 @@ export default function AuthPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const { user, loading, signIn, signUp } = useAuth()
@@ -19,28 +20,54 @@ export default function AuthPage() {
     }
   }, [user, loading, navigate])
 
+  // 将 Supabase 错误翻译为用户友好中文
+  const friendlyError = (msg: string): string => {
+    if (msg.includes('rate limit') || msg.includes('Too Many')) {
+      return '操作太频繁，请稍后再试（约 60 秒）。'
+    }
+    if (msg.includes('Invalid login') || msg.includes('Invalid Login')) {
+      return '邮箱或密码错误，请重试。'
+    }
+    if (msg.includes('not confirmed')) {
+      return '邮箱尚未确认，请先点击邮件中的确认链接。'
+    }
+    if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('already been')) {
+      return '该邮箱已注册，请直接登录或使用其他邮箱。'
+    }
+    return msg
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setSuccessMsg('')
     setSubmitting(true)
 
-    const { error: authError } =
-      mode === 'login'
-        ? await signIn(email, password)
-        : await signUp(email, password)
-
-    setSubmitting(false)
-
-    if (authError) {
-      setError(authError.message)
+    if (mode === 'login') {
+      const { error: authError } = await signIn(email, password)
+      setSubmitting(false)
+      if (authError) {
+        setError(friendlyError(authError.message))
+      } else {
+        navigate('/')
+      }
     } else {
-      navigate('/')
+      const { error: authError, needsConfirmation } = await signUp(email, password)
+      setSubmitting(false)
+      if (authError) {
+        setError(friendlyError(authError.message))
+      } else if (needsConfirmation) {
+        setSuccessMsg('注册成功！请检查邮箱并点击确认链接，然后返回登录。')
+      } else {
+        navigate('/')
+      }
     }
   }
 
   const switchMode = (nextMode: 'login' | 'register') => {
     setMode(nextMode)
     setError('')
+    setSuccessMsg('')
   }
 
   if (loading) {
@@ -130,6 +157,12 @@ export default function AuthPage() {
           {error && (
             <div className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
               {error}
+            </div>
+          )}
+
+          {successMsg && (
+            <div className="text-sm text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-2">
+              {successMsg}
             </div>
           )}
 

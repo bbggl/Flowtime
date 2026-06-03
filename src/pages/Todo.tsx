@@ -9,15 +9,8 @@ import {
   Trash2,
   Check,
 } from 'lucide-react'
-import { createTodoStore } from '../stores/useTodoStore'
-import { createPomodoroStore } from '../stores/usePomodoroStore'
+import { useTodoStore, usePomodoroStore } from '../stores'
 import type { Todo } from '../types'
-
-// ---------------------------------------------------------------------------
-// Store singletons
-// ---------------------------------------------------------------------------
-const useTodoStore = createTodoStore({})
-const usePomodoroStore = createPomodoroStore({})
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,12 +53,14 @@ function CalendarView({
   todos,
   onPrev,
   onNext,
+  onDateClick,
 }: {
   year: number
   month: number
   todos: Todo[]
   onPrev: () => void
   onNext: () => void
+  onDateClick: (date: string) => void
 }) {
   const totalDays = daysInMonth(year, month)
   const firstDay = firstDayOfMonth(year, month)
@@ -134,17 +129,18 @@ function CalendarView({
           const isToday = dateKey === today
 
           return (
-            <div
+            <button
               key={dateKey}
-              className={`aspect-square flex items-center justify-center rounded-lg text-xs font-medium transition-colors
+              onClick={() => onDateClick(dateKey)}
+              className={`aspect-square flex items-center justify-center rounded-lg text-xs font-medium transition-colors cursor-pointer hover:scale-110 active:scale-95
                 ${status === 'all-done' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : ''}
                 ${status === 'has-pending' ? 'bg-red-400/20 text-red-500 dark:text-red-400' : ''}
-                ${status === 'none' ? 'text-light-text-secondary dark:text-dark-text-secondary' : ''}
+                ${status === 'none' ? 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/40 dark:hover:bg-dark-border/40' : ''}
                 ${isToday ? 'ring-2 ring-primary dark:ring-primary-dark' : ''}
               `}
             >
               {day}
-            </div>
+            </button>
           )
         })}
       </div>
@@ -170,6 +166,14 @@ export default function Todo() {
   const setCurrentCategory = useTodoStore((s) => s.setCurrentCategory)
   const getFilteredTodos = useTodoStore((s) => s.getFilteredTodos)
   const isReadOnlyView = useTodoStore((s) => s.isReadOnlyView)
+  const selectedDate = useTodoStore((s) => s.selectedDate)
+  const setSelectedDate = useTodoStore((s) => s.setSelectedDate)
+
+  // Mount 时从 Supabase 加载数据
+  useEffect(() => {
+    useTodoStore.getState().loadTodos()
+    useTodoStore.getState().loadCategories()
+  }, [])
 
   // --- Pomodoro store ---
   const linkTask = usePomodoroStore((s) => s.linkTask)
@@ -210,10 +214,8 @@ export default function Todo() {
   const isTodayView = currentCategory === 'today'
   const filteredTodos = getFilteredTodos()
 
-  // "today" view: extra filter to only show today's date (auto-clears next day)
-  const displayTodos = isTodayView
-    ? filteredTodos.filter((t) => t.date === todayStr())
-    : filteredTodos
+  // The store already filters by date for "today" view (with selectedDate support)
+  const displayTodos = filteredTodos
 
   // --- Handlers ---
   const handleAdd = useCallback(() => {
@@ -232,12 +234,24 @@ export default function Todo() {
 
   const handleCreateCategory = useCallback(() => {
     const name = newCategoryName.trim()
-    if (!name) return
+    if (!name) {
+      setShowAddCategory(false)
+      setNewCategoryName('')
+      return
+    }
     createCategory(name)
     setCurrentCategory(name)
     setNewCategoryName('')
     setShowAddCategory(false)
   }, [newCategoryName, createCategory, setCurrentCategory])
+
+  const handleCategoryInputBlur = useCallback(() => {
+    // 延迟关闭，让确认按钮的 onClick 有机会先触发
+    setTimeout(() => {
+      setShowAddCategory(false)
+      setNewCategoryName('')
+    }, 150)
+  }, [])
 
   const handleCategoryKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -287,6 +301,18 @@ export default function Todo() {
     })
   }, [])
 
+  const handleDateClick = useCallback(
+    (date: string) => {
+      setSelectedDate(date)
+      setShowCalendar(false)
+    },
+    [setSelectedDate],
+  )
+
+  const handleBackToToday = useCallback(() => {
+    setSelectedDate(null)
+  }, [setSelectedDate])
+
   // --- Render ---
   return (
     <div className="flex flex-col h-full p-6">
@@ -332,6 +358,7 @@ export default function Todo() {
               value={newCategoryName}
               onChange={(e) => setNewCategoryName(e.target.value)}
               onKeyDown={handleCategoryKeyDown}
+              onBlur={handleCategoryInputBlur}
               placeholder="分类名"
               className="w-24 px-3 py-1.5 rounded-full text-sm bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border text-light-text dark:text-dark-text placeholder:text-light-text-secondary/60 dark:placeholder:text-dark-text-secondary/60 outline-none focus:ring-2 ring-primary/40 dark:ring-primary-dark/40"
             />
@@ -493,7 +520,22 @@ export default function Todo() {
       {/* Calendar (only in "today" view)                                   */}
       {/* ================================================================ */}
       {isTodayView && (
-        <div className="flex-shrink-0 mt-4 flex flex-col items-start">
+        <div className="flex-shrink-0 mt-4 flex flex-col items-start gap-3">
+          {/* Show selected date info + back button when viewing history */}
+          {selectedDate && (
+            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-primary/10 dark:bg-primary-dark/10 border border-primary/20 dark:border-primary-dark/20">
+              <span className="text-sm text-primary dark:text-primary-dark font-medium">
+                查看 {selectedDate} 的历史待办
+              </span>
+              <button
+                onClick={handleBackToToday}
+                className="px-3 py-1 rounded-lg text-xs font-medium bg-primary dark:bg-primary-dark text-white hover:opacity-90 transition-opacity"
+              >
+                返回今天
+              </button>
+            </div>
+          )}
+
           {showCalendar && (
             <div className="mb-3">
               <CalendarView
@@ -502,6 +544,7 @@ export default function Todo() {
                 todos={todos}
                 onPrev={calendarPrev}
                 onNext={calendarNext}
+                onDateClick={handleDateClick}
               />
             </div>
           )}

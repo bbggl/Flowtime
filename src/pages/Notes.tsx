@@ -1,12 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useStore } from 'zustand'
-import { createNotesStore } from '../stores/useNotesStore'
+import { useNotesStore } from '../stores'
 import { useThemeStore } from '../stores/useThemeStore'
 import MDEditor from '@uiw/react-md-editor'
 import '@uiw/react-md-editor/markdown-editor.css'
 import { Search, Plus, X } from 'lucide-react'
-
-const notesStore = createNotesStore(null)
 
 function fuzzyMatch(text: string, query: string): boolean {
   if (!query.trim()) return true
@@ -37,9 +35,14 @@ function getTagColor(index: number): string {
 export default function Notes() {
   const theme = useThemeStore((s) => s.theme)
 
-  const notes = useStore(notesStore, (s) => s.notes)
-  const currentNoteId = useStore(notesStore, (s) => s.currentNoteId)
-  const searchQuery = useStore(notesStore, (s) => s.searchQuery)
+  // Mount 时从 Supabase 加载笔记
+  useEffect(() => {
+    useNotesStore.getState().loadNotes()
+  }, [])
+
+  const notes = useStore(useNotesStore, (s) => s.notes)
+  const currentNoteId = useStore(useNotesStore, (s) => s.currentNoteId)
+  const searchQuery = useStore(useNotesStore, (s) => s.searchQuery)
 
   const currentNote = useMemo(() => {
     if (!currentNoteId) return null
@@ -71,7 +74,7 @@ export default function Notes() {
     if (!currentNote) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      notesStore.getState().updateNote(currentNote.id, {
+      useNotesStore.getState().updateNote(currentNote.id, {
         title,
         content,
         tags,
@@ -87,7 +90,7 @@ export default function Notes() {
   useEffect(() => {
     if (didInitRef.current) return
     didInitRef.current = true
-    const state = notesStore.getState()
+    const state = useNotesStore.getState()
     if (state.notes.length > 0 && !state.currentNoteId) {
       state.setCurrentNote(state.notes[0].id)
     }
@@ -103,21 +106,21 @@ export default function Notes() {
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      notesStore.getState().setSearchQuery(e.target.value)
+      useNotesStore.getState().setSearchQuery(e.target.value)
     },
     [],
   )
 
   const handleAddNote = useCallback(() => {
-    notesStore.getState().addNote()
+    useNotesStore.getState().addNote()
   }, [])
 
   const handleSelectNote = useCallback((id: string) => {
-    notesStore.getState().setCurrentNote(id)
+    useNotesStore.getState().setCurrentNote(id)
   }, [])
 
   const handleDeleteNote = useCallback((id: string) => {
-    notesStore.getState().deleteNote(id)
+    useNotesStore.getState().deleteNote(id)
   }, [])
 
   const handleAddTag = useCallback(() => {

@@ -11,7 +11,11 @@
       "Bash(npm install *)",
       "Bash(npx tsc *)",
       "Bash(npx vitest *)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "mcp__supabase__get_publishable_keys",
+      "mcp__supabase__apply_migration",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }

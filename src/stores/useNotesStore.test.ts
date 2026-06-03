@@ -1,5 +1,31 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createNotesStore } from './useNotesStore'
+import type { Note } from '../types'
+
+vi.mock('../lib/offlineDb', () => ({
+  isOnline: () => true,
+  cacheTable: vi.fn(),
+  loadCachedTable: vi.fn().mockResolvedValue([]),
+  queueMutation: vi.fn(),
+  getQueue: vi.fn().mockResolvedValue([]),
+  clearQueue: vi.fn(),
+  flushQueue: vi.fn(),
+  onOnline: vi.fn(() => () => {}),
+  onOffline: vi.fn(() => () => {}),
+}))
+
+function makeNote(overrides: Partial<Note> = {}): Note {
+  return {
+    id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
+    user_id: 'u1',
+    title: '',
+    content: '',
+    tags: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  }
+}
 
 describe('useNotesStore', () => {
   let store: ReturnType<typeof createNotesStore>
@@ -75,6 +101,7 @@ describe('useNotesStore', () => {
     it('switches to next note if deleted note was current and others exist', () => {
       store.getState().addNote()
       const firstId = store.getState().notes[0].id
+      store.getState().updateNote(firstId, { title: 'Note 1' }) // 填充标题，允许再新增
       store.getState().addNote()
       store.getState().setCurrentNote(firstId)
       store.getState().deleteNote(firstId)
@@ -85,10 +112,9 @@ describe('useNotesStore', () => {
   describe('searchNotes', () => {
     it('returns notes matching the search query in title', () => {
       store.getState().addNote()
+      store.getState().updateNote(store.getState().notes[0].id, { title: 'Meeting Notes' })
       store.getState().addNote()
-      const ids = store.getState().notes.map((n) => n.id)
-      store.getState().updateNote(ids[0], { title: 'Meeting Notes' })
-      store.getState().updateNote(ids[1], { title: 'Shopping List' })
+      store.getState().updateNote(store.getState().notes[1].id, { title: 'Shopping List' })
 
       store.getState().setSearchQuery('Meeting')
       const filtered = store.getState().getFilteredNotes()
@@ -98,6 +124,7 @@ describe('useNotesStore', () => {
 
     it('returns all notes when query is empty', () => {
       store.getState().addNote()
+      store.getState().updateNote(store.getState().notes[0].id, { title: 'Note A' })
       store.getState().addNote()
       store.getState().setSearchQuery('')
       expect(store.getState().getFilteredNotes()).toHaveLength(2)
@@ -118,6 +145,57 @@ describe('useNotesStore', () => {
       const id = store.getState().notes[0].id
       store.getState().setCurrentNote(id)
       expect(store.getState().currentNoteId).toBe(id)
+    })
+  })
+
+  // --- Realtime sync handlers (Task 9) ---
+  describe('handleRealtimeInsert', () => {
+    it('adds a new note from realtime event', () => {
+      const remote = makeNote({ id: 'n-r1', title: 'Remote note' })
+      store.getState().handleRealtimeInsert(remote)
+      expect(store.getState().notes).toHaveLength(1)
+      expect(store.getState().notes[0].title).toBe('Remote note')
+    })
+
+    it('does not add duplicate note', () => {
+      const remote = makeNote({ id: 'n-r1' })
+      store.getState().handleRealtimeInsert(remote)
+      store.getState().handleRealtimeInsert(remote)
+      expect(store.getState().notes).toHaveLength(1)
+    })
+  })
+
+  describe('handleRealtimeUpdate', () => {
+    it('updates an existing note from realtime', () => {
+      const note = makeNote({ id: 'n-1', title: 'Old' })
+      store.setState({ notes: [note] })
+
+      store.getState().handleRealtimeUpdate({ id: 'n-1', title: 'New', content: 'updated' } as Note)
+      expect(store.getState().notes[0].title).toBe('New')
+      expect(store.getState().notes[0].content).toBe('updated')
+    })
+
+    it('ignores update for non-existent id', () => {
+      store.getState().handleRealtimeUpdate({ id: 'ghost', title: 'Ghost' } as Note)
+      expect(store.getState().notes).toHaveLength(0)
+    })
+  })
+
+  describe('handleRealtimeDelete', () => {
+    it('removes a note by id from realtime', () => {
+      const note = makeNote({ id: 'n-1' })
+      store.setState({ notes: [note] })
+
+      store.getState().handleRealtimeDelete('n-1')
+      expect(store.getState().notes).toHaveLength(0)
+    })
+
+    it('does nothing for unknown id', () => {
+      const note = makeNote({ id: 'n-1' })
+      store.setState({ notes: [note] })
+
+      store.getState().handleRealtimeDelete('unknown')
+      expect(store.getState().notes).toHaveLength(1)
     })
   })
 

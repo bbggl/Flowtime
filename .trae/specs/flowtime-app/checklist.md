@@ -10,18 +10,19 @@
 - [ ] 暗色模式自动跟随系统正常（未手动设置时）
 
 ## 阶段二：Supabase 集成
-- [ ] Supabase 数据库表（todos、pomodoro_records、notes、user_settings）已创建
-- [ ] RLS 策略已启用，数据按 user_id 隔离
-- [ ] 邮箱注册流程正常（注册 → 验证 → 登录）
-- [ ] 登录后访问受保护页面，未登录重定向到 `/auth`
-- [ ] 登出后无法访问受保护页面
-- [ ] Supabase 客户端初始化文件 `lib/supabase.ts` 可用
+- [x] Supabase 数据库表（todos、pomodoro_records、notes、user_settings）已创建
+- [x] RLS 策略已启用，数据按 user_id 隔离
+- [x] 邮箱注册流程正常（注册 → email确认提示 → 登录）
+- [x] 登录后访问受保护页面，未登录重定向到 `/auth`
+- [x] 登出后无法访问受保护页面
+- [x] Supabase 客户端初始化文件 `lib/supabase.ts` 可用
 
 ## 阶段三：数据层
-- [ ] TypeScript 类型定义完整（Todo、PomodoroRecord、Note）
-- [ ] `useTodoStore` 从 Supabase 加载和写入数据正确
-- [ ] `usePomodoroStore` 从 Supabase 加载和写入数据正确
-- [ ] `useNotesStore` 从 Supabase 加载和写入数据正确
+- [x] TypeScript 类型定义完整（Todo、PomodoroRecord、Note）
+- [x] `useTodoStore` 从 Supabase 加载和写入数据正确
+- [x] `usePomodoroStore` 从 Supabase 加载和写入数据正确
+- [x] `useNotesStore` 从 Supabase 加载和写入数据正确
+- [x] 页面 mount 时自动从 Supabase 加载数据
 
 ## 阶段四：待办事项页
 - [ ] 筛选栏顺序正确：今天 > 全部 > 计划中 > 已完成 > 自定义分类

@@ -9,6 +9,7 @@ type Store = ReturnType<typeof createPomodoroStore>
 export function usePomodoroTimer(store: Store) {
   const rafRef = useRef<number | null>(null)
   const lastFrameRef = useRef<number>(0)
+  const accumulatedRef = useRef<number>(0)
 
   const mode = useStore(store, (s) => s.mode)
   const status = useStore(store, (s) => s.status)
@@ -34,8 +35,12 @@ export function usePomodoroTimer(store: Store) {
       const delta = now - lastFrameRef.current
       lastFrameRef.current = now
 
-      if (delta > 0) {
-        store.getState().tick(Math.floor(delta / 1000))
+      // 累积毫秒级 delta，满 1 秒才 tick
+      accumulatedRef.current += delta
+      const fullSeconds = Math.floor(accumulatedRef.current / 1000)
+      if (fullSeconds > 0) {
+        store.getState().tick(fullSeconds)
+        accumulatedRef.current -= fullSeconds * 1000
       }
 
       const currentStatus = store.getState().status
@@ -50,6 +55,7 @@ export function usePomodoroTimer(store: Store) {
   useEffect(() => {
     if (status === 'running') {
       lastFrameRef.current = 0
+      accumulatedRef.current = 0
       rafRef.current = requestAnimationFrame(tick)
     } else {
       stopRaf()

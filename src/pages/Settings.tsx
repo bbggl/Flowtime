@@ -1,25 +1,19 @@
-import { useState } from 'react'
 import { useStore } from 'zustand'
-import { createPomodoroStore } from '../stores/usePomodoroStore'
-import { supabase } from '../lib/supabase'
+import { usePomodoroStore } from '../stores'
 import { Timer, Bell, Volume2 } from 'lucide-react'
 
-const pomodoroStore = createPomodoroStore(supabase)
-
-function loadLocalFlag(key: string, fallback: boolean): boolean {
-  const raw = localStorage.getItem(key)
-  if (raw === null) return fallback
-  return raw !== 'false'
-}
-
 export default function Settings() {
-  // ── Pomodoro settings (from store, in seconds internally) ──
-  const workDuration = useStore(pomodoroStore, (s) => s.workDuration)
-  const shortBreakDuration = useStore(pomodoroStore, (s) => s.shortBreakDuration)
-  const longBreakDuration = useStore(pomodoroStore, (s) => s.longBreakDuration)
-  const longBreakInterval = useStore(pomodoroStore, (s) => s.longBreakInterval)
-  const dailyGoal = useStore(pomodoroStore, (s) => s.dailyGoal)
-  const setDurations = useStore(pomodoroStore, (s) => s.setDurations)
+  // ── Pomodoro settings (from store, persisted to Supabase) ──
+  const workDuration = useStore(usePomodoroStore, (s) => s.workDuration)
+  const shortBreakDuration = useStore(usePomodoroStore, (s) => s.shortBreakDuration)
+  const longBreakDuration = useStore(usePomodoroStore, (s) => s.longBreakDuration)
+  const longBreakInterval = useStore(usePomodoroStore, (s) => s.longBreakInterval)
+  const dailyGoal = useStore(usePomodoroStore, (s) => s.dailyGoal)
+  const setDurations = useStore(usePomodoroStore, (s) => s.setDurations)
+  const soundEnabled = useStore(usePomodoroStore, (s) => s.soundEnabled)
+  const notificationEnabled = useStore(usePomodoroStore, (s) => s.notificationEnabled)
+  const setSoundEnabled = useStore(usePomodoroStore, (s) => s.setSoundEnabled)
+  const setNotificationEnabled = useStore(usePomodoroStore, (s) => s.setNotificationEnabled)
 
   const workMin = workDuration / 60
   const shortBreakMin = shortBreakDuration / 60
@@ -47,25 +41,9 @@ export default function Settings() {
     setDurations(settings)
   }
 
-  // ── Notification settings (local state + localStorage) ──
-  const [notificationOn, setNotificationOn] = useState(() =>
-    loadLocalFlag('flowtime-notification', true),
-  )
-  const [soundOn, setSoundOn] = useState(() =>
-    loadLocalFlag('flowtime-sound', true),
-  )
-
-  const toggleNotification = () => {
-    const next = !notificationOn
-    setNotificationOn(next)
-    localStorage.setItem('flowtime-notification', String(next))
-  }
-
-  const toggleSound = () => {
-    const next = !soundOn
-    setSoundOn(next)
-    localStorage.setItem('flowtime-sound', String(next))
-  }
+  // ── Notification settings (persisted to Supabase + localStorage) ──
+  const toggleNotification = () => setNotificationEnabled(!notificationEnabled)
+  const toggleSound = () => setSoundEnabled(!soundEnabled)
 
   const sectionHeader =
     'text-lg font-semibold text-light-text dark:text-dark-text mb-4 flex items-center gap-2'
@@ -212,11 +190,11 @@ export default function Settings() {
             <button
               type="button"
               role="switch"
-              aria-checked={notificationOn}
+              aria-checked={notificationEnabled}
               onClick={toggleNotification}
-              className={toggleTrack(notificationOn)}
+              className={toggleTrack(notificationEnabled)}
             >
-              <span className={toggleKnob(notificationOn)} />
+              <span className={toggleKnob(notificationEnabled)} />
             </button>
           </div>
 
@@ -231,11 +209,11 @@ export default function Settings() {
             <button
               type="button"
               role="switch"
-              aria-checked={soundOn}
+              aria-checked={soundEnabled}
               onClick={toggleSound}
-              className={toggleTrack(soundOn)}
+              className={toggleTrack(soundEnabled)}
             >
-              <span className={toggleKnob(soundOn)} />
+              <span className={toggleKnob(soundEnabled)} />
             </button>
           </div>
         </div>

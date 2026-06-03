@@ -27,8 +27,10 @@ export function useAuth() {
   }, [])
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password })
-    return { error }
+    const { data, error } = await supabase.auth.signUp({ email, password })
+    // session 为 null → 需要 email 确认
+    const needsConfirmation = !error && !data.session
+    return { error, needsConfirmation }
   }, [])
 
   const signIn = useCallback(async (email: string, password: string) => {

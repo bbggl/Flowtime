@@ -1,5 +1,32 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPomodoroStore } from './usePomodoroStore'
+import type { PomodoroRecord } from '../types'
+
+vi.mock('../lib/offlineDb', () => ({
+  isOnline: () => true,
+  cacheTable: vi.fn(),
+  loadCachedTable: vi.fn().mockResolvedValue([]),
+  queueMutation: vi.fn(),
+  getQueue: vi.fn().mockResolvedValue([]),
+  clearQueue: vi.fn(),
+  flushQueue: vi.fn(),
+  onOnline: vi.fn(() => () => {}),
+  onOffline: vi.fn(() => () => {}),
+}))
+
+function makeRecord(overrides: Partial<PomodoroRecord> = {}): PomodoroRecord {
+  return {
+    id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
+    user_id: 'u1',
+    mode: 'work',
+    duration: 25 * 60,
+    actual_duration: 25 * 60,
+    status: 'completed',
+    started_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+    ...overrides,
+  }
+}
 
 function makeStore() {
   const store = createPomodoroStore({} as any)
@@ -115,34 +142,41 @@ describe('usePomodoroStore', () => {
     })
   })
 
-  // --- Scenario: 跳过 ---
-  describe('跳过 (Skip)', () => {
-    it('records PomodoroRecord with interrupted status', () => {
+  // --- Scenario: 跳过（提前完成）---
+  describe('跳过 (Skip — early complete)', () => {
+    it('records PomodoroRecord with completed status', () => {
       store.getState().start()
       store.getState().tick(300)
       store.getState().skip()
       const records = store.getState().records
       expect(records).toHaveLength(1)
-      expect(records[0].status).toBe('interrupted')
+      expect(records[0].status).toBe('completed')
     })
 
-    it('does not increment completedCount', () => {
+    it('increments completedCount for work mode', () => {
+      store.getState().start()
+      store.getState().skip()
+      expect(store.getState().completedCount).toBe(1)
+    })
+
+    it('does not increment completedCount for break mode', () => {
+      store.getState().setMode('short_break')
       store.getState().start()
       store.getState().skip()
       expect(store.getState().completedCount).toBe(0)
     })
 
-    it('does not increment task completedPomos', () => {
+    it('increments task completedPomos when linked', () => {
       store.getState().linkTask('task1', 'Test')
       store.getState().start()
       store.getState().skip()
-      expect(store.getState().taskCompletedPomos).toBe(0)
+      expect(store.getState().taskCompletedPomos).toBe(1)
     })
 
-    it('returns to IDLE state', () => {
+    it('returns to FINISHED state', () => {
       store.getState().start()
       store.getState().skip()
-      expect(store.getState().status).toBe('idle')
+      expect(store.getState().status).toBe('finished')
       expect(store.getState().remainingSeconds).toBe(25 * 60)
     })
   })
@@ -234,6 +268,56 @@ describe('usePomodoroStore', () => {
       store.getState().tick(25 * 60)
       expect(store.getState().completedCount).toBe(2)
       expect(store.getState().getTodayFocusTime()).toBe(50 * 60)
+    })
+  })
+
+  // --- Realtime sync handlers (Task 9) ---
+  describe('handleRealtimeInsert', () => {
+    it('adds a new record from realtime event', () => {
+      const remote = makeRecord({ id: 'rec-r1', mode: 'work', duration: 1500 })
+      store.getState().handleRealtimeInsert(remote)
+      expect(store.getState().records).toHaveLength(1)
+      expect(store.getState().records[0].id).toBe('rec-r1')
+    })
+
+    it('does not add duplicate record', () => {
+      const remote = makeRecord({ id: 'rec-r1' })
+      store.getState().handleRealtimeInsert(remote)
+      store.getState().handleRealtimeInsert(remote)
+      expect(store.getState().records).toHaveLength(1)
+    })
+  })
+
+  describe('handleRealtimeUpdate', () => {
+    it('updates an existing record from realtime', () => {
+      const rec = makeRecord({ id: 'rec-1', duration: 1000 })
+      store.setState({ records: [rec] })
+
+      store.getState().handleRealtimeUpdate({ id: 'rec-1', duration: 2000 } as PomodoroRecord)
+      expect(store.getState().records[0].duration).toBe(2000)
+    })
+
+    it('ignores update for non-existent id', () => {
+      store.getState().handleRealtimeUpdate({ id: 'ghost', duration: 999 } as PomodoroRecord)
+      expect(store.getState().records).toHaveLength(0)
+    })
+  })
+
+  describe('handleRealtimeDelete', () => {
+    it('removes a record by id from realtime', () => {
+      const rec = makeRecord({ id: 'rec-1' })
+      store.setState({ records: [rec] })
+
+      store.getState().handleRealtimeDelete('rec-1')
+      expect(store.getState().records).toHaveLength(0)
+    })
+
+    it('does nothing for unknown id', () => {
+      const rec = makeRecord({ id: 'rec-1' })
+      store.setState({ records: [rec] })
+
+      store.getState().handleRealtimeDelete('unknown')
+      expect(store.getState().records).toHaveLength(1)
     })
   })
 

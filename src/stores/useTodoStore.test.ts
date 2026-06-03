@@ -1,6 +1,19 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createTodoStore } from './useTodoStore'
 import type { Todo } from '../types'
+
+// Minimal mock: only mock what the store imports
+vi.mock('../lib/offlineDb', () => ({
+  isOnline: () => true,
+  cacheTable: vi.fn(),
+  loadCachedTable: vi.fn().mockResolvedValue([]),
+  queueMutation: vi.fn(),
+  getQueue: vi.fn().mockResolvedValue([]),
+  clearQueue: vi.fn(),
+  flushQueue: vi.fn(),
+  onOnline: vi.fn(() => () => {}),
+  onOffline: vi.fn(() => () => {}),
+}))
 
 // In-memory mock Supabase client
 function createMockSupabase() {
@@ -18,16 +31,19 @@ function createMockSupabase() {
       order: (_col: string, _opts?: { ascending: boolean }) =>
         Promise.resolve({ data: [...tables[table]], error: null }),
     }),
-    insert: (rows: unknown[]) => {
-      for (const row of rows) {
+    insert: (rows: unknown | unknown[]) => {
+      const items = Array.isArray(rows) ? rows : [rows]
+      for (const row of items) {
         tables[table].push({ ...(row as object), id: (row as Todo).id ?? crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) })
       }
-      return { select: () => ({ single: () => Promise.resolve({ data: rows[0], error: null }) }) }
+      return { select: () => ({ single: () => Promise.resolve({ data: items[0], error: null }) }) }
     },
     update: (updates: unknown) => ({
       eq: (_col: string, _val: string) => {
         for (const row of tables[table]) {
-          Object.assign(row, updates as object)
+          if ((row as Record<string, unknown>)[_col] === _val) {
+            Object.assign(row, updates as object)
+          }
         }
         return Promise.resolve({ data: null, error: null })
       },
@@ -44,12 +60,39 @@ function createMockSupabase() {
   return { from } as any
 }
 
+function makeTodo(overrides: Partial<Todo> = {}): Todo {
+  return {
+    id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
+    user_id: 'u1',
+    title: 'Test',
+    status: 'pending',
+    priority: 'medium',
+    category: 'work',
+    estimated_pomos: 1,
+    completed_pomos: 0,
+    created_at: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe('useTodoStore', () => {
   let store: ReturnType<typeof createTodoStore>
 
   beforeEach(() => {
     store = createTodoStore(createMockSupabase())
   })
+
+  // =========================================================================
+  // Existing tests (unchanged)
+  // =========================================================================
 
   describe('addTodo', () => {
     it('adds a new todo to the list', () => {
@@ -189,6 +232,140 @@ describe('useTodoStore', () => {
     it('returns false for today and custom categories', () => {
       expect(store.getState().isReadOnlyView('today')).toBe(false)
       expect(store.getState().isReadOnlyView('work')).toBe(false)
+    })
+  })
+
+  // =========================================================================
+  // Task 7: Cross-day persistence + historical calendar
+  // =========================================================================
+
+  describe('selectedDate filtering (Task 7)', () => {
+    it('setSelectedDate changes the selectedDate state', () => {
+      store.getState().setSelectedDate('2026-01-15')
+      expect(store.getState().selectedDate).toBe('2026-01-15')
+    })
+
+    it('setSelectedDate(null) clears selection', () => {
+      store.getState().setSelectedDate('2026-01-15')
+      store.getState().setSelectedDate(null)
+      expect(store.getState().selectedDate).toBeNull()
+    })
+
+    it('getFilteredTodos for "today" uses selectedDate when set', () => {
+      // Add a task dated yesterday and a task dated today — both "today" category
+      const yesterday = '2020-01-01' // a past date
+      store.getState().addTodo('Yesterday task', 'today')
+      store.getState().addTodo('Today task', 'today')
+
+      // Manually set the date on the first todo to yesterday (addTodo auto-sets today)
+      const state = store.getState()
+      const todos = [...state.todos]
+      todos[0] = { ...todos[0], date: yesterday }
+      // We need a way to inject dated todos. Use direct store replacement for testing.
+      // The store's state is mutable via the zustand setter.
+      store.setState({ todos })
+
+      // Default: no selectedDate → should show today's tasks only
+      store.getState().setCurrentCategory('today')
+      store.getState().setSelectedDate(null)
+      const todayFiltered = store.getState().getFilteredTodos()
+      expect(todayFiltered.every((t) => t.date === todayStr())).toBe(true)
+
+      // Select yesterday → should show yesterday's tasks
+      store.getState().setSelectedDate(yesterday)
+      const historyFiltered = store.getState().getFilteredTodos()
+      expect(historyFiltered).toHaveLength(1)
+      expect(historyFiltered[0].title).toBe('Yesterday task')
+      expect(historyFiltered[0].date).toBe(yesterday)
+    })
+
+    it('getFilteredTodos for "today" without selectedDate returns no tasks from past dates (auto-clear)', () => {
+      const yesterday = '2020-01-01'
+      store.getState().addTodo('Past task', 'today')
+      const state = store.getState()
+      const todos = [...state.todos]
+      todos[0] = { ...todos[0], date: yesterday }
+      store.setState({ todos })
+
+      store.getState().setCurrentCategory('today')
+      store.getState().setSelectedDate(null)
+
+      const filtered = store.getState().getFilteredTodos()
+      // Past-date "today" tasks should NOT appear in today's view
+      expect(filtered.every((t) => t.date === todayStr())).toBe(true)
+      expect(filtered.find((t) => t.title === 'Past task')).toBeUndefined()
+    })
+
+    it('selectedDate only affects "today" category view', () => {
+      store.getState().addTodo('Work task', 'work')
+      store.getState().setSelectedDate('2020-01-01')
+      store.getState().setCurrentCategory('work')
+
+      // Non-"today" views ignore selectedDate
+      const filtered = store.getState().getFilteredTodos()
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0].title).toBe('Work task')
+    })
+  })
+
+  // =========================================================================
+  // Task 9: Realtime sync handlers
+  // =========================================================================
+
+  describe('handleRealtimeInsert', () => {
+    it('adds a new todo from realtime event', () => {
+      const remote = makeTodo({ id: 'r1', title: 'From remote' })
+      store.getState().handleRealtimeInsert(remote)
+      expect(store.getState().todos).toHaveLength(1)
+      expect(store.getState().todos[0].id).toBe('r1')
+      expect(store.getState().todos[0].title).toBe('From remote')
+    })
+
+    it('does not add duplicate (same id)', () => {
+      const remote = makeTodo({ id: 'r1' })
+      store.getState().handleRealtimeInsert(remote)
+      store.getState().handleRealtimeInsert(remote)
+      expect(store.getState().todos).toHaveLength(1)
+    })
+
+    it('respects current category filter after insert', () => {
+      const remote = makeTodo({ id: 'r1', title: 'Remote task', category: 'work' })
+      store.getState().handleRealtimeInsert(remote)
+      store.getState().setCurrentCategory('work')
+      expect(store.getState().getFilteredTodos()).toHaveLength(1)
+    })
+  })
+
+  describe('handleRealtimeUpdate', () => {
+    it('updates an existing todo from realtime', () => {
+      store.getState().addTodo('Local', 'work')
+      const id = store.getState().todos[0].id
+
+      store.getState().handleRealtimeUpdate({ id, title: 'Updated from remote', status: 'done' } as Todo)
+      const updated = store.getState().todos[0]
+      expect(updated.title).toBe('Updated from remote')
+      expect(updated.status).toBe('done')
+    })
+
+    it('ignores update for non-existent id', () => {
+      store.getState().handleRealtimeUpdate({ id: 'unknown', title: 'Ghost' } as Todo)
+      expect(store.getState().todos).toHaveLength(0)
+    })
+  })
+
+  describe('handleRealtimeDelete', () => {
+    it('removes a todo identified by id from realtime', () => {
+      store.getState().addTodo('To be deleted', 'work')
+      const id = store.getState().todos[0].id
+
+      store.getState().handleRealtimeDelete(id)
+      expect(store.getState().todos).toHaveLength(0)
+    })
+
+    it('does nothing for unknown id', () => {
+      store.getState().addTodo('Keep me', 'work')
+      store.getState().handleRealtimeDelete('unknown')
+      expect(store.getState().todos).toHaveLength(1)
     })
   })
 })

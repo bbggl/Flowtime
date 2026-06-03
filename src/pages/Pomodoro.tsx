@@ -138,6 +138,19 @@ export default function Pomodoro() {
   )
 
   const [taskDropdownOpen, setTaskDropdownOpen] = useState(false)
+  const taskDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Click outside to close task dropdown
+  useEffect(() => {
+    if (!taskDropdownOpen) return
+    const handler = (e: MouseEvent) => {
+      if (taskDropdownRef.current && !taskDropdownRef.current.contains(e.target as Node)) {
+        setTaskDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [taskDropdownOpen])
   const [flashRing, setFlashRing] = useState(false)
   const [showLongBreakTip, setShowLongBreakTip] = useState(false)
   const dismissedBreakCountRef = useRef<number>(-1)
@@ -513,7 +526,10 @@ export default function Pomodoro() {
 
         {/* Dropdown */}
         {taskDropdownOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 z-20 bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border rounded-xl shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+          <div
+            ref={taskDropdownRef}
+            className="absolute top-full left-0 right-0 mt-1 z-20 bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border rounded-xl shadow-lg overflow-hidden max-h-48 overflow-y-auto"
+          >
             {pendingTodos.length === 0 ? (
               <p className="px-4 py-3 text-sm text-light-text-secondary dark:text-dark-text-secondary">
                 暂无待办任务

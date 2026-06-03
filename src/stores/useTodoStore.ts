@@ -50,8 +50,11 @@ interface TodoState {
   addTodo: (title: string, category: string) => void
   toggleTodo: (id: string) => void
   changePriority: (id: string) => void
+  changeEstimatedPomos: (id: string) => void
   deleteTodo: (id: string) => void
   createCategory: (name: string) => void
+  renameCategory: (oldName: string, newName: string) => void
+  deleteCategory: (name: string) => void
   setCurrentCategory: (category: string) => void
   setSelectedDate: (date: string | null) => void
 
@@ -149,8 +152,8 @@ export const createTodoStore = (supabase: SupabaseClient) => {
         status: 'pending',
         priority: 'medium',
         category,
-        date: category === 'today' ? todayStr() : undefined,
-        estimated_pomos: category === 'today' ? 0 : 1,
+        date: category === 'today' ? (get().selectedDate || todayStr()) : undefined,
+        estimated_pomos: 1,
         completed_pomos: 0,
         created_at: new Date().toISOString(),
         completed_at: undefined,
@@ -236,6 +239,28 @@ export const createTodoStore = (supabase: SupabaseClient) => {
       }
     },
 
+    changeEstimatedPomos(id) {
+      const todo = get().todos.find((t) => t.id === id)
+      if (!todo) return
+
+      // Cycle: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 0 → 1 → ...
+      const next = todo.estimated_pomos >= 8 ? 0 : todo.estimated_pomos + 1
+
+      set({
+        todos: get().todos.map((t) => (t.id !== id ? t : { ...t, estimated_pomos: next })),
+      })
+
+      if (isRealSupabase) {
+        supabase
+          .from('todos')
+          .update({ estimated_pomos: next })
+          .eq('id', id)
+          .then(({ error }) => {
+            if (error) console.warn('Todo estimated_pomos update failed:', error.message)
+          })
+      }
+    },
+
     deleteTodo(id) {
       set({ todos: get().todos.filter((t) => t.id !== id) })
 
@@ -267,6 +292,72 @@ export const createTodoStore = (supabase: SupabaseClient) => {
           .single()
           .then(({ error }: { error: any }) => {
             if (error) console.warn('Category insert failed:', error.message)
+          })
+      }
+    },
+
+    renameCategory(oldName, newName) {
+      const cats = get().categories
+      const trimmed = newName.trim()
+      if (!trimmed || oldName === trimmed) return
+      if (cats.some((c) => c.name === trimmed || c.id === trimmed)) return
+
+      const updated = cats.map((c) =>
+        c.id === oldName ? { ...c, id: trimmed, name: trimmed } : c,
+      )
+      set({ categories: updated })
+
+      // 更新所有属于该分类的 todo
+      const updatedTodos = get().todos.map((t) =>
+        t.category === oldName ? { ...t, category: trimmed } : t,
+      )
+      set({ todos: updatedTodos })
+
+      saveCustomCategories(updated)
+
+      if (isRealSupabase) {
+        // 更新 categories 表
+        supabase
+          .from('categories')
+          .update({ name: trimmed })
+          .eq('name', oldName)
+          .then(({ error }) => {
+            if (error) console.warn('Category rename failed:', error.message)
+          })
+        // 更新 todos 表
+        supabase
+          .from('todos')
+          .update({ category: trimmed })
+          .eq('category', oldName)
+          .then(({ error }) => {
+            if (error) console.warn('Todo category update failed:', error.message)
+          })
+      }
+    },
+
+    deleteCategory(name) {
+      const cats = get().categories
+      const updated = cats.filter((c) => c.id !== name)
+      set({ categories: updated })
+      saveCustomCategories(updated)
+
+      // 删除属于该分类的 todo
+      set({ todos: get().todos.filter((t) => t.category !== name) })
+
+      if (isRealSupabase) {
+        supabase
+          .from('categories')
+          .delete()
+          .eq('name', name)
+          .then(({ error }) => {
+            if (error) console.warn('Category delete failed:', error.message)
+          })
+        supabase
+          .from('todos')
+          .delete()
+          .eq('category', name)
+          .then(({ error }) => {
+            if (error) console.warn('Todo category delete failed:', error.message)
           })
       }
     },

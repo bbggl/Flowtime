@@ -191,15 +191,6 @@ export default function Notes() {
                     <div className="text-sm font-medium truncate text-light-text dark:text-dark-text">
                       {note.title || '无标题'}
                     </div>
-                    <div className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-0.5 truncate">
-                      {note.content
-                        ? note.content
-                            .replace(/^#+\s+/gm, '')
-                            .replace(/[*_~`>[\]#-]/g, '')
-                            .trim()
-                            .slice(0, 60) || '暂无内容'
-                        : '暂无内容'}
-                    </div>
                   </div>
                   <button
                     onClick={(e) => {
@@ -282,7 +273,7 @@ export default function Notes() {
 
             {/* Markdown editor */}
             <div
-              className="flex-1 min-h-0"
+              className="flex-1 min-h-0 overflow-hidden"
               data-color-mode={theme === 'dark' ? 'dark' : 'light'}
             >
               <MDEditor
@@ -290,7 +281,7 @@ export default function Notes() {
                 onChange={(val) => setContent(val ?? '')}
                 preview="live"
                 visibleDragbar={false}
-                style={{ height: '100%' }}
+                height="100%"
               />
             </div>
           </>

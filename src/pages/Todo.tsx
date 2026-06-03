@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Trash2,
   Check,
+  X,
 } from 'lucide-react'
 import { useTodoStore, usePomodoroStore } from '../stores'
 import type { Todo } from '../types'
@@ -51,20 +52,62 @@ function CalendarView({
   year,
   month,
   todos,
-  onPrev,
-  onNext,
+  onJump,
   onDateClick,
+  onClose,
 }: {
   year: number
   month: number
   todos: Todo[]
-  onPrev: () => void
-  onNext: () => void
+  onJump: (year: number, month: number) => void
   onDateClick: (date: string) => void
+  onClose: () => void
 }) {
   const totalDays = daysInMonth(year, month)
   const firstDay = firstDayOfMonth(year, month)
   const today = todayStr()
+
+  // Month/year picker state
+  const [showPicker, setShowPicker] = useState(false)
+  const [pickerYear, setPickerYear] = useState(year)
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const calendarRef = useRef<HTMLDivElement>(null)
+
+  // Click outside to close picker
+  useEffect(() => {
+    if (!showPicker) return
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPicker])
+
+  // Click outside to close calendar
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (calendarRef.current && !calendarRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  // When opening the picker, sync its year to the current calendar year
+  const openPicker = () => {
+    setPickerYear(year)
+    setShowPicker(true)
+  }
+
+  const handleMonthSelect = (m: number) => {
+    onJump(pickerYear, m)
+    setShowPicker(false)
+  }
+
+  const MONTH_NAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
 
   // Build date -> status map
   const statusMap = new Map<string, DateStatus>()
@@ -85,27 +128,65 @@ function CalendarView({
   for (let d = 1; d <= totalDays; d++) cells.push(d)
 
   return (
-    <div className="w-72 p-4 rounded-2xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border shadow-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+    <div
+      ref={calendarRef}
+      className="relative w-72 p-4 rounded-2xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border shadow-lg"
+    >
+      {/* Header — month/year title only, clickable to open picker */}
+      <div className="flex items-center justify-center mb-3">
         <button
-          onClick={onPrev}
-          className="p-1 rounded-lg hover:bg-light-bg dark:hover:bg-dark-bg transition-colors"
-          aria-label="上个月"
+          onClick={openPicker}
+          className="text-sm font-semibold text-light-text dark:text-dark-text hover:text-primary dark:hover:text-primary-dark transition-colors px-2 py-0.5 rounded-lg hover:bg-light-bg dark:hover:bg-dark-bg"
+          title="选择月份"
         >
-          <ChevronLeft className="w-4 h-4 text-light-text-secondary dark:text-dark-text-secondary" />
-        </button>
-        <span className="text-sm font-semibold text-light-text dark:text-dark-text">
           {year}年{month + 1}月
-        </span>
-        <button
-          onClick={onNext}
-          className="p-1 rounded-lg hover:bg-light-bg dark:hover:bg-dark-bg transition-colors"
-          aria-label="下个月"
-        >
-          <ChevronRight className="w-4 h-4 text-light-text-secondary dark:text-dark-text-secondary" />
         </button>
       </div>
+
+      {/* Month/Year picker dropdown — absolute overlay */}
+      {showPicker && (
+        <div
+          ref={pickerRef}
+          className="absolute top-12 left-4 right-4 z-20 p-2 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border shadow-xl"
+        >
+          {/* Year stepper */}
+          <div className="flex items-center justify-between mb-2">
+            <button
+              onClick={() => setPickerYear((y) => y - 1)}
+              className="p-0.5 rounded hover:bg-light-border/50 dark:hover:bg-dark-border/50 transition-colors"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-light-text-secondary dark:text-dark-text-secondary" />
+            </button>
+            <span className="text-xs font-semibold text-light-text dark:text-dark-text">{pickerYear}年</span>
+            <button
+              onClick={() => setPickerYear((y) => y + 1)}
+              className="p-0.5 rounded hover:bg-light-border/50 dark:hover:bg-dark-border/50 transition-colors"
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-light-text-secondary dark:text-dark-text-secondary" />
+            </button>
+          </div>
+          {/* Month grid */}
+          <div className="grid grid-cols-4 gap-1">
+            {MONTH_NAMES.map((name, idx) => {
+              const isCurrent = pickerYear === year && idx === month
+              return (
+                <button
+                  key={name}
+                  onClick={() => handleMonthSelect(idx)}
+                  className={`py-1.5 rounded-lg text-xs font-medium transition-colors
+                    ${isCurrent
+                      ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
+                      : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'
+                    }
+                  `}
+                >
+                  {name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Weekday headers */}
       <div className="grid grid-cols-7 gap-1 mb-1">
@@ -161,8 +242,11 @@ export default function Todo() {
   const addTodo = useTodoStore((s) => s.addTodo)
   const toggleTodo = useTodoStore((s) => s.toggleTodo)
   const changePriority = useTodoStore((s) => s.changePriority)
+  const changeEstimatedPomos = useTodoStore((s) => s.changeEstimatedPomos)
   const deleteTodo = useTodoStore((s) => s.deleteTodo)
   const createCategory = useTodoStore((s) => s.createCategory)
+  const renameCategory = useTodoStore((s) => s.renameCategory)
+  const deleteCategory = useTodoStore((s) => s.deleteCategory)
   const setCurrentCategory = useTodoStore((s) => s.setCurrentCategory)
   const getFilteredTodos = useTodoStore((s) => s.getFilteredTodos)
   const isReadOnlyView = useTodoStore((s) => s.isReadOnlyView)
@@ -189,6 +273,13 @@ export default function Todo() {
   })
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set())
+  const [editingCatName, setEditingCatName] = useState<string | null>(null)
+  const [renameCatInput, setRenameCatInput] = useState('')
+
+  // --- Date helpers ---
+  function isPastDate(dateStr: string): boolean {
+    return dateStr < todayStr()
+  }
 
   // --- Detect newly added tasks for enter animation ---
   const prevTodosLenRef = useRef(todos.length)
@@ -212,6 +303,8 @@ export default function Todo() {
   // --- Derived ---
   const isReadonly = isReadOnlyView(currentCategory)
   const isTodayView = currentCategory === 'today'
+  const isPastSelected = selectedDate ? isPastDate(selectedDate) : false
+  const showInput = !isReadonly && !isPastSelected
   const filteredTodos = getFilteredTodos()
 
   // The store already filters by date for "today" view (with selectedDate support)
@@ -264,6 +357,49 @@ export default function Todo() {
     [handleCreateCategory],
   )
 
+  const handleStartRenameCategory = useCallback((name: string) => {
+    setEditingCatName(name)
+    setRenameCatInput(name)
+  }, [])
+
+  const handleConfirmRenameCategory = useCallback(() => {
+    const newName = renameCatInput.trim()
+    if (editingCatName && newName && newName !== editingCatName) {
+      renameCategory(editingCatName, newName)
+      // If we were viewing the renamed category, switch to the new name
+      if (currentCategory === editingCatName) {
+        setCurrentCategory(newName)
+      }
+    }
+    setEditingCatName(null)
+    setRenameCatInput('')
+  }, [editingCatName, renameCatInput, renameCategory, currentCategory, setCurrentCategory])
+
+  const handleCancelRenameCategory = useCallback(() => {
+    setEditingCatName(null)
+    setRenameCatInput('')
+  }, [])
+
+  const handleDeleteCategory = useCallback(
+    (name: string) => {
+      if (!window.confirm(`确定要删除分类"${name}"及其所有待办吗？`)) return
+      deleteCategory(name)
+      // If we were viewing the deleted category, switch to today
+      if (currentCategory === name) {
+        setCurrentCategory('today')
+      }
+    },
+    [deleteCategory, currentCategory, setCurrentCategory],
+  )
+
+  const handleRenameKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') handleConfirmRenameCategory()
+      if (e.key === 'Escape') handleCancelRenameCategory()
+    },
+    [handleConfirmRenameCategory, handleCancelRenameCategory],
+  )
+
   const handleDelete = useCallback(
     (id: string) => {
       setDeletingIds((prev) => new Set([...prev, id]))
@@ -287,18 +423,8 @@ export default function Todo() {
     [linkTask, navigate],
   )
 
-  const calendarPrev = useCallback(() => {
-    setCalendarDate((prev) => {
-      if (prev.month === 0) return { year: prev.year - 1, month: 11 }
-      return { ...prev, month: prev.month - 1 }
-    })
-  }, [])
-
-  const calendarNext = useCallback(() => {
-    setCalendarDate((prev) => {
-      if (prev.month === 11) return { year: prev.year + 1, month: 0 }
-      return { ...prev, month: prev.month + 1 }
-    })
+  const handleCalendarJump = useCallback((y: number, m: number) => {
+    setCalendarDate({ year: y, month: m })
   }, [])
 
   const handleDateClick = useCallback(
@@ -334,21 +460,67 @@ export default function Todo() {
       {/* Category filter bar                                               */}
       {/* ================================================================ */}
       <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-1 flex-shrink-0">
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => setCurrentCategory(cat.id)}
-            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors
-              ${
-                currentCategory === cat.id
-                  ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
-                  : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'
-              }
-            `}
-          >
-            {cat.name}
-          </button>
-        ))}
+        {categories.map((cat) => {
+            const isCustom = cat.type === 'custom'
+            const isEditing = editingCatName === cat.name
+
+            if (isEditing) {
+              return (
+                <div key={cat.id} className="flex-shrink-0 flex items-center gap-1">
+                  <input
+                    autoFocus
+                    value={renameCatInput}
+                    onChange={(e) => setRenameCatInput(e.target.value)}
+                    onKeyDown={handleRenameKeyDown}
+                    onBlur={handleCancelRenameCategory}
+                    className="w-24 px-3 py-1.5 rounded-full text-sm bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border text-light-text dark:text-dark-text outline-none focus:ring-2 ring-primary/40 dark:ring-primary-dark/40"
+                  />
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); handleConfirmRenameCategory() }}
+                    disabled={!renameCatInput.trim()}
+                    className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-primary dark:bg-primary-dark text-white disabled:opacity-40 transition-opacity"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
+            }
+
+            return (
+              <div key={cat.id} className="flex-shrink-0 group relative">
+                <button
+                  onClick={() => setCurrentCategory(cat.id)}
+                  className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors min-w-[3rem] text-center
+                    ${
+                      currentCategory === cat.id
+                        ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
+                        : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'
+                    }
+                  `}
+                >
+                  {cat.name}
+                </button>
+                {isCustom && (
+                  <span className="absolute -top-1 -right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleStartRenameCategory(cat.name) }}
+                      className="w-4 h-4 rounded-full bg-light-bg dark:bg-dark-bg border border-light-border dark:border-dark-border flex items-center justify-center hover:bg-primary/10 dark:hover:bg-primary-dark/10 transition-colors"
+                      title="重命名分类"
+                    >
+                      <svg className="w-2.5 h-2.5 text-light-text-secondary dark:text-dark-text-secondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.name) }}
+                      className="w-4 h-4 rounded-full bg-light-bg dark:bg-dark-bg border border-light-border dark:border-dark-border flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      title="删除分类"
+                    >
+                      <X className="w-2.5 h-2.5 text-light-text-secondary dark:text-dark-text-secondary" />
+                    </button>
+                  </span>
+                )}
+              </div>
+            )
+          })}
 
         {/* Add-category "+" button  /  inline name input */}
         {showAddCategory ? (
@@ -382,9 +554,9 @@ export default function Todo() {
       </div>
 
       {/* ================================================================ */}
-      {/* Task input (hidden for read-only views)                           */}
+      {/* Task input (hidden for read-only views and past dates)            */}
       {/* ================================================================ */}
-      {!isReadonly && (
+      {showInput && (
         <div className="flex gap-3 mb-5 flex-shrink-0">
           <input
             type="text"
@@ -407,7 +579,7 @@ export default function Todo() {
       {/* ================================================================ */}
       {/* Task list                                                         */}
       {/* ================================================================ */}
-      <div className="flex-1 overflow-y-auto -mx-1 px-1">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-1 px-1">
         {displayTodos.length === 0 ? (
           /* ---- Empty state ---- */
           <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -415,9 +587,11 @@ export default function Todo() {
               <Check className="w-8 h-8 text-light-text-secondary/40 dark:text-dark-text-secondary/40" />
             </div>
             <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-              {isReadonly
-                ? '该分类下暂无任务'
-                : '还没有任务，添加第一个吧！'}
+              {isPastSelected
+                ? '该日期暂无历史待办'
+                : isReadonly
+                  ? '该分类下暂无任务'
+                  : '还没有任务，添加第一个吧！'}
             </p>
           </div>
         ) : (
@@ -427,7 +601,6 @@ export default function Todo() {
               const isDeleting = deletingIds.has(todo.id)
               const isEntering = enteringIds.has(todo.id)
               const meta = PRIORITY_META[todo.priority]
-              const showPomoCount = todo.estimated_pomos > 0
 
               return (
                 <div
@@ -467,40 +640,48 @@ export default function Todo() {
                       {todo.title}
                     </span>
 
-                    {/* Priority tag (click to cycle) */}
-                    <button
-                      onClick={() => changePriority(todo.id)}
-                      className={`flex-shrink-0 px-2 py-0.5 rounded-md text-xs font-medium transition-all hover:scale-105 active:scale-95 ${meta.bg}`}
-                      title="点击切换优先级"
-                    >
-                      {meta.label}
-                    </button>
-
-                    {/* Pomodoro count (only if linked) */}
-                    {showPomoCount && (
-                      <span className="flex-shrink-0 text-xs font-mono text-primary dark:text-primary-dark tabular-nums">
-                        🍅 {todo.completed_pomos}/{todo.estimated_pomos}
-                      </span>
+                    {/* Priority tag (click to cycle, hidden for past dates) */}
+                    {!isPastSelected && (
+                      <button
+                        onClick={() => changePriority(todo.id)}
+                        className={`flex-shrink-0 px-2 py-0.5 rounded-md text-xs font-medium transition-all hover:scale-105 active:scale-95 ${meta.bg}`}
+                        title="点击切换优先级"
+                      >
+                        {meta.label}
+                      </button>
                     )}
 
-                    {/* Start pomodoro button */}
+                    {/* Pomodoro count (click to cycle, always visible) */}
                     <button
-                      onClick={() => handleStartPomodoro(todo)}
-                      className="flex-shrink-0 flex items-center gap-0.5 px-2 py-1 rounded-lg text-xs font-medium text-primary dark:text-primary-dark hover:bg-primary/10 dark:hover:bg-primary-dark/10 transition-colors"
-                      title="开始番茄钟"
+                      onClick={() => changeEstimatedPomos(todo.id)}
+                      className="flex-shrink-0 text-xs font-mono text-primary dark:text-primary-dark tabular-nums hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                      title="点击更改番茄钟数量"
                     >
-                      <Play className="w-3 h-3" />
-                      🍅
+                      🍅 {todo.completed_pomos}/{todo.estimated_pomos}
                     </button>
 
-                    {/* Delete button (visible on hover) */}
-                    <button
-                      onClick={() => handleDelete(todo.id)}
-                      className="flex-shrink-0 p-1 rounded-lg text-light-text-secondary/40 dark:text-dark-text-secondary/40 hover:text-red-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-all"
-                      title="删除任务"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {/* Start pomodoro button (hidden for past dates) */}
+                    {!isPastSelected && (
+                      <button
+                        onClick={() => handleStartPomodoro(todo)}
+                        className="flex-shrink-0 flex items-center gap-0.5 px-2 py-1 rounded-lg text-xs font-medium text-primary dark:text-primary-dark hover:bg-primary/10 dark:hover:bg-primary-dark/10 transition-colors"
+                        title="开始番茄钟"
+                      >
+                        <Play className="w-3 h-3" />
+                        🍅
+                      </button>
+                    )}
+
+                    {/* Delete button (visible on hover, hidden for past dates) */}
+                    {!isPastSelected && (
+                      <button
+                        onClick={() => handleDelete(todo.id)}
+                        className="flex-shrink-0 p-1 rounded-lg text-light-text-secondary/40 dark:text-dark-text-secondary/40 hover:text-red-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-all"
+                        title="删除任务"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Description row (2-line ellipsis, only if present) */}
@@ -525,7 +706,11 @@ export default function Todo() {
           {selectedDate && (
             <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-primary/10 dark:bg-primary-dark/10 border border-primary/20 dark:border-primary-dark/20">
               <span className="text-sm text-primary dark:text-primary-dark font-medium">
-                查看 {selectedDate} 的历史待办
+                {isPastSelected
+                  ? `查看 ${selectedDate} 的历史待办（仅可标记完成）`
+                  : selectedDate === todayStr()
+                    ? `查看 ${selectedDate} 的待办`
+                    : `查看 ${selectedDate} 的待办`}
               </span>
               <button
                 onClick={handleBackToToday}
@@ -542,9 +727,9 @@ export default function Todo() {
                 year={calendarDate.year}
                 month={calendarDate.month}
                 todos={todos}
-                onPrev={calendarPrev}
-                onNext={calendarNext}
+                onJump={handleCalendarJump}
                 onDateClick={handleDateClick}
+                onClose={() => setShowCalendar(false)}
               />
             </div>
           )}

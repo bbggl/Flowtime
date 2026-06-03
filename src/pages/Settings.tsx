@@ -1,8 +1,13 @@
 import { useStore } from 'zustand'
+import { useNavigate } from 'react-router-dom'
 import { usePomodoroStore } from '../stores'
-import { Timer, Bell, Volume2 } from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
+import { Timer, Bell, Volume2, LogOut } from 'lucide-react'
 
 export default function Settings() {
+  const navigate = useNavigate()
+  const { signOut } = useAuth()
+
   // ── Pomodoro settings (from store, persisted to Supabase) ──
   const workDuration = useStore(usePomodoroStore, (s) => s.workDuration)
   const shortBreakDuration = useStore(usePomodoroStore, (s) => s.shortBreakDuration)
@@ -44,6 +49,12 @@ export default function Settings() {
   // ── Notification settings (persisted to Supabase + localStorage) ──
   const toggleNotification = () => setNotificationEnabled(!notificationEnabled)
   const toggleSound = () => setSoundEnabled(!soundEnabled)
+
+  // ── Logout ──
+  const handleLogout = async () => {
+    await signOut()
+    navigate('/auth')
+  }
 
   const sectionHeader =
     'text-lg font-semibold text-light-text dark:text-dark-text mb-4 flex items-center gap-2'
@@ -217,6 +228,20 @@ export default function Settings() {
             </button>
           </div>
         </div>
+      </section>
+
+      {/* ── Section 3: 账户 ── */}
+      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mt-6">
+        <h2 className={sectionHeader}>
+          <LogOut className="w-5 h-5 text-primary dark:text-primary-dark" />
+          账户
+        </h2>
+        <button
+          onClick={handleLogout}
+          className="w-full py-2.5 rounded-xl border border-red-300 dark:border-red-800 text-red-500 dark:text-red-400 font-medium text-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+        >
+          退出登录
+        </button>
       </section>
     </div>
   )

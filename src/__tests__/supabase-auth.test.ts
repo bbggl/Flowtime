@@ -158,7 +158,7 @@ describe('RLS 数据隔离', () => {
         email: 'tdd-test@flowtime.test',
         password: 'test123456',
       })
-      signInA = { session: data.session, user: data.user }
+      signInA = data as typeof signInA
     }
     userAId = signInA.user!.id
 

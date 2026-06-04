@@ -96,18 +96,20 @@ function CalendarView({
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
-  // When opening the picker, sync its year to the current calendar year
-  const openPicker = () => {
-    setPickerYear(year)
-    setShowPicker(true)
-  }
-
   const handleMonthSelect = (m: number) => {
     onJump(pickerYear, m)
     setShowPicker(false)
   }
 
   const MONTH_NAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+
+  // Build set of (YYYY-MM) keys that have todos — for marking months with dots
+  const monthsWithTodos = new Set<string>()
+  for (const t of todos) {
+    if (t.date) {
+      monthsWithTodos.add(t.date.slice(0, 7)) // "YYYY-MM"
+    }
+  }
 
   // Build date -> status map
   const statusMap = new Map<string, DateStatus>()
@@ -135,7 +137,15 @@ function CalendarView({
       {/* Header — month/year title only, clickable to open picker */}
       <div className="flex items-center justify-center mb-3">
         <button
-          onClick={openPicker}
+          onMouseDown={(e) => { if (showPicker) e.stopPropagation() }}
+          onClick={() => {
+            if (showPicker) {
+              setShowPicker(false)
+            } else {
+              setPickerYear(year)
+              setShowPicker(true)
+            }
+          }}
           className="text-sm font-semibold text-light-text dark:text-dark-text hover:text-primary dark:hover:text-primary-dark transition-colors px-2 py-0.5 rounded-lg hover:bg-light-bg dark:hover:bg-dark-bg"
           title="选择月份"
         >
@@ -169,11 +179,12 @@ function CalendarView({
           <div className="grid grid-cols-4 gap-1">
             {MONTH_NAMES.map((name, idx) => {
               const isCurrent = pickerYear === year && idx === month
+              const hasTodos = monthsWithTodos.has(`${pickerYear}-${String(idx + 1).padStart(2, '0')}`)
               return (
                 <button
                   key={name}
                   onClick={() => handleMonthSelect(idx)}
-                  className={`py-1.5 rounded-lg text-xs font-medium transition-colors
+                  className={`relative py-1.5 rounded-lg text-xs font-medium transition-colors
                     ${isCurrent
                       ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
                       : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'
@@ -181,6 +192,9 @@ function CalendarView({
                   `}
                 >
                   {name}
+                  {hasTodos && (
+                    <span className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${isCurrent ? 'bg-white/70' : 'bg-primary/60 dark:bg-primary-dark/60'}`} />
+                  )}
                 </button>
               )
             })}
@@ -735,6 +749,7 @@ export default function Todo() {
           )}
 
           <button
+            onMouseDown={(e) => { if (showCalendar) e.stopPropagation() }}
             onClick={() => setShowCalendar((v) => !v)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border text-sm text-light-text-secondary dark:text-dark-text-secondary hover:text-primary dark:hover:text-primary-dark transition-colors"
           >

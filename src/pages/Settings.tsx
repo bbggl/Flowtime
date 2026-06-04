@@ -1,8 +1,9 @@
+import { useState, useMemo } from 'react'
 import { useStore } from 'zustand'
 import { useNavigate } from 'react-router-dom'
-import { usePomodoroStore } from '../stores'
+import { usePomodoroStore, useTodoStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
-import { Timer, Bell, Volume2, LogOut } from 'lucide-react'
+import { Timer, Bell, Volume2, LogOut, CheckSquare } from 'lucide-react'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -44,6 +45,58 @@ export default function Settings() {
         break
     }
     setDurations(settings)
+  }
+
+  // ── Dashboard todo overview settings ──
+  const categories = useStore(useTodoStore, (s) => s.categories)
+
+  // Only real categories (today + custom), not readonly views (全部/计划中/已完成)
+  const selectableCategories = useMemo(
+    () => categories.filter((c) => c.type !== 'readonly'),
+    [categories],
+  )
+
+  const DASHBOARD_CATEGORIES_KEY = 'flowtime-dashboard-categories'
+  const DASHBOARD_TODAY_FILTER_KEY = 'flowtime-dashboard-today-filter'
+
+  const [dashboardCategories, setDashboardCategories] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_CATEGORIES_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as string[]
+        if (parsed.length > 0) return parsed
+      }
+    } catch { /* ignore */ }
+    // Default: all non-readonly categories
+    return selectableCategories.map((c) => c.id)
+  })
+
+  const [todaySubFilter, setTodaySubFilter] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_TODAY_FILTER_KEY)
+      if (raw) return JSON.parse(raw) as string[]
+    } catch { /* ignore */ }
+    return ['today', 'future', 'past']
+  })
+
+  const toggleDashboardCategory = (catId: string) => {
+    setDashboardCategories((prev) => {
+      const next = prev.includes(catId)
+        ? prev.filter((c) => c !== catId)
+        : [...prev, catId]
+      localStorage.setItem(DASHBOARD_CATEGORIES_KEY, JSON.stringify(next))
+      return next
+    })
+  }
+
+  const toggleTodaySub = (filter: string) => {
+    setTodaySubFilter((prev) => {
+      const next = prev.includes(filter)
+        ? prev.filter((f) => f !== filter)
+        : [...prev, filter]
+      localStorage.setItem(DASHBOARD_TODAY_FILTER_KEY, JSON.stringify(next))
+      return next
+    })
   }
 
   // ── Notification settings (persisted to Supabase + localStorage) ──
@@ -230,7 +283,64 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* ── Section 3: 账户 ── */}
+      {/* ── Section 3: 仪表盘设置 ── */}
+      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mt-6">
+        <h2 className={sectionHeader}>
+          <CheckSquare className="w-5 h-5 text-primary dark:text-primary-dark" />
+          仪表盘设置
+        </h2>
+        <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary mb-3">
+          选择仪表盘待办概览中显示的待办分类
+        </p>
+        <div className="space-y-2">
+          {selectableCategories.map((cat) => {
+            const isToday = cat.id === 'today'
+            const checked = dashboardCategories.includes(cat.id)
+            return (
+              <div key={cat.id}>
+                <label className="flex items-center gap-2.5 cursor-pointer select-none py-1">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleDashboardCategory(cat.id)}
+                    className="w-4 h-4 rounded accent-primary dark:accent-primary-dark cursor-pointer"
+                  />
+                  <span className="text-sm text-light-text dark:text-dark-text font-medium">
+                    {cat.name}
+                  </span>
+                </label>
+                {/* Today sub-filters */}
+                {isToday && checked && (
+                  <div className="ml-7 mt-1 space-y-1">
+                    {([
+                      { key: 'today', label: '今天的待办' },
+                      { key: 'future', label: '未来的待办' },
+                      { key: 'past', label: '过去的待办' },
+                    ] as const).map(({ key, label }) => (
+                      <label
+                        key={key}
+                        className="flex items-center gap-2 cursor-pointer select-none py-0.5"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={todaySubFilter.includes(key)}
+                          onChange={() => toggleTodaySub(key)}
+                          className="w-3.5 h-3.5 rounded accent-primary dark:accent-primary-dark cursor-pointer"
+                        />
+                        <span className="text-xs text-light-text-secondary dark:text-dark-text-secondary">
+                          {label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ── Section 4: 账户 ── */}
       <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mt-6">
         <h2 className={sectionHeader}>
           <LogOut className="w-5 h-5 text-primary dark:text-primary-dark" />

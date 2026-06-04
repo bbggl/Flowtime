@@ -494,6 +494,7 @@ export default function Pomodoro() {
       {/* ── Task link card ─────────────────────────────────────────────── */}
       <div className="relative w-full max-w-sm">
         <button
+          onMouseDown={(e) => { if (taskDropdownOpen) e.stopPropagation() }}
           onClick={handleToggleTaskDropdown}
           className="w-full text-left px-4 py-3 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border hover:border-primary/40 dark:hover:border-primary-dark/40 transition-colors"
         >

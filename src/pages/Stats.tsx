@@ -1,7 +1,7 @@
-import { useMemo, useCallback, useEffect, useState } from 'react'
+import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import { useStore } from 'zustand'
 import { useStatsStore, usePomodoroStore, useTodoStore } from '../stores'
-import { Granularity } from '../utils/stats'
+import { Granularity, filterByGranularity } from '../utils/stats'
 import type { Granularity as GranularityType } from '../utils/stats'
 import type { PomodoroRecord } from '../types'
 import {
@@ -15,7 +15,7 @@ import {
   Pie,
   Cell,
 } from 'recharts'
-import { Clock, CheckCircle2, TrendingUp, Target } from 'lucide-react'
+import { Clock, CheckCircle2, TrendingUp, Target, Calendar, ChevronLeft, ChevronRight } from 'lucide-react'
 
 // ── Constants ──
 
@@ -47,8 +47,9 @@ interface TrendPoint {
   value: number
 }
 
-function accumulate(records: PomodoroRecord[], granularity: GranularityType, useCount: boolean) {
-  const workRecords = records.filter(
+function accumulate(records: PomodoroRecord[], granularity: GranularityType, useCount: boolean, referenceDate?: string | null) {
+  const scopedRecords = filterByGranularity(records, granularity, referenceDate)
+  const workRecords = scopedRecords.filter(
     (r) => r.mode === 'work' && r.status === 'completed',
   )
   // count mode: each record = 1; duration mode: sum actual_duration
@@ -116,8 +117,9 @@ function computeTrendData(
   records: PomodoroRecord[],
   granularity: GranularityType,
   mode: 'duration' | 'count',
+  referenceDate?: string | null,
 ): TrendPoint[] {
-  return accumulate(records, granularity, mode === 'count')
+  return accumulate(records, granularity, mode === 'count', referenceDate)
 }
 
 // ── Task distribution ──
@@ -184,6 +186,7 @@ function computeTaskDistribution(
 export default function Stats() {
   const granularity = useStore(useStatsStore, (s) => s.granularity)
   const records = useStore(useStatsStore, (s) => s.records)
+  const selectedDate = useStore(useStatsStore, (s) => s.selectedDate)
 
   // Mount 时从 Supabase 加载番茄记录和待办（任务分布需要 todo 名称）
   useEffect(() => {
@@ -209,26 +212,49 @@ export default function Stats() {
   // Trend toggle: count vs duration
   const [trendMode, setTrendMode] = useState<'duration' | 'count'>('duration')
 
-  // Derived data
+  // Calendar state
+  const [showCalendar, setShowCalendar] = useState(false)
+  const todayDate = new Date()
+  const [calendarYear, setCalendarYear] = useState(todayDate.getFullYear())
+  const [calendarMonth, setCalendarMonth] = useState(todayDate.getMonth())
+  const calendarRef = useRef<HTMLDivElement>(null)
+
+  // Calendar click-outside
+  useEffect(() => {
+    if (!showCalendar) return
+    const handler = (e: MouseEvent) => {
+      if (calendarRef.current && !calendarRef.current.contains(e.target as Node)) {
+        setShowCalendar(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showCalendar])
+
+  // Derived data — threaded with selectedDate
   const trendData = useMemo(
-    () => computeTrendData(records, granularity, trendMode),
-    [records, granularity, trendMode],
+    () => computeTrendData(records, granularity, trendMode, selectedDate),
+    [records, granularity, trendMode, selectedDate],
   )
 
   const taskDistribution = useMemo(
-    () => computeTaskDistribution(records, todoNames),
-    [records, todoNames],
+    () => {
+      const scopedRecords = filterByGranularity(records, granularity, selectedDate)
+      return computeTaskDistribution(scopedRecords, todoNames)
+    },
+    [records, todoNames, granularity, selectedDate],
   )
 
   const summary = useMemo(() => {
-    const workRecords = records.filter((r) => r.mode === 'work')
+    const scopedRecords = filterByGranularity(records, granularity, selectedDate)
+    const workRecords = scopedRecords.filter((r) => r.mode === 'work')
     const completed = workRecords.filter((r) => r.status === 'completed')
     const totalFocusSecs = completed.reduce((s, r) => s + r.actual_duration, 0)
     const completedPomos = completed.length
     const completionRate =
       workRecords.length > 0 ? completed.length / workRecords.length : 0
 
-    // Daily avg
+    // Daily avg within the selected time range
     const days = new Set(workRecords.map((r) => r.started_at.split('T')[0]))
     const dailyAvg = days.size > 0 ? completed.length / days.size : 0
 
@@ -238,7 +264,7 @@ export default function Stats() {
       dailyAvg,
       completionRate,
     }
-  }, [records])
+  }, [records, granularity, selectedDate])
 
   const hasRecords = records.length > 0
   const hasTrendData = trendData.some((d) => d.value > 0)
@@ -247,6 +273,61 @@ export default function Stats() {
   const handleGranularityChange = useCallback((g: GranularityType) => {
     useStatsStore.getState().setGranularity(g)
   }, [])
+
+  // ── Calendar helpers ──
+
+  const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六']
+
+  function daysInMonth(y: number, m: number): number {
+    return new Date(y, m + 1, 0).getDate()
+  }
+
+  function firstDayOfMonth(y: number, m: number): number {
+    return new Date(y, m, 1).getDay()
+  }
+
+  function formatDate(y: number, m: number, d: number): string {
+    return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  }
+
+  /** Format a human-readable period label based on granularity + reference date */
+  function formatPeriodLabel(g: GranularityType, ref: string): string {
+    const parts = ref.split('-').map(Number)
+    const y = parts[0]; const mo = parts[1]; const day = parts[2]
+    const d = new Date(y, mo - 1, day)
+
+    switch (g) {
+      case Granularity.Day:
+        return `${y}年${mo}月${day}日`
+      case Granularity.Week: {
+        const dayOfWeek = d.getDay()
+        const diff = day - dayOfWeek + (dayOfWeek === 0 ? -6 : 1)
+        const mon = new Date(y, mo - 1, diff)
+        const sun = new Date(y, mo - 1, diff + 6)
+        return `${mon.getMonth() + 1}/${mon.getDate()} - ${sun.getMonth() + 1}/${sun.getDate()}`
+      }
+      case Granularity.Month:
+        return `${y}年${mo}月`
+      case Granularity.Year:
+        return `${y}年`
+    }
+  }
+
+  const handleDateSelect = (date: string) => {
+    useStatsStore.getState().setSelectedDate(date)
+    setShowCalendar(false)
+  }
+
+  const handleBackToToday = () => {
+    useStatsStore.getState().setSelectedDate(null)
+  }
+
+  // Mini calendar cells
+  const calTotalDays = daysInMonth(calendarYear, calendarMonth)
+  const calFirstDay = firstDayOfMonth(calendarYear, calendarMonth)
+  const calCells: (number | null)[] = []
+  for (let i = 0; i < calFirstDay; i++) calCells.push(null)
+  for (let d = 1; d <= calTotalDays; d++) calCells.push(d)
 
   // ── Shared class strings ──
 
@@ -259,25 +340,249 @@ export default function Stats() {
 
   return (
     <div className="p-6 h-full overflow-y-auto">
-      <h1 className="text-xl font-bold text-light-text dark:text-dark-text mb-5">
-        统计
-      </h1>
+      {/* ── Header row: title + tabs + calendar ── */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-light-text dark:text-dark-text">
+            统计
+          </h1>
+          {/* Granularity tabs */}
+          <div className="flex items-center gap-1 bg-light-card dark:bg-dark-card rounded-lg border border-light-border dark:border-dark-border p-1">
+            {GRANULARITY_TABS.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => handleGranularityChange(key)}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  granularity === key
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text dark:hover:text-dark-text'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      {/* ── Granularity tabs ── */}
-      <div className="flex items-center gap-1 mb-5 bg-light-card dark:bg-dark-card rounded-lg border border-light-border dark:border-dark-border p-1 w-fit">
-        {GRANULARITY_TABS.map(({ key, label }) => (
+        {/* Calendar picker */}
+        <div className="flex items-center gap-2 relative">
           <button
-            key={key}
-            onClick={() => handleGranularityChange(key)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              granularity === key
-                ? 'bg-primary text-white shadow-sm'
-                : 'text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text dark:hover:text-dark-text'
-            }`}
+            onMouseDown={(e) => { if (showCalendar) e.stopPropagation() }}
+            onClick={() => setShowCalendar((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border text-sm text-light-text-secondary dark:text-dark-text-secondary hover:text-primary dark:hover:text-primary-dark transition-colors"
           >
-            {label}
+            <Calendar className="w-4 h-4" />
+            <span>
+              {selectedDate
+                ? formatPeriodLabel(granularity, selectedDate)
+                : formatPeriodLabel(granularity, `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`)}
+            </span>
           </button>
-        ))}
+
+          {selectedDate && (
+            <button
+              onClick={handleBackToToday}
+              className="text-xs text-primary dark:text-primary-dark hover:underline whitespace-nowrap"
+            >
+              返回今天
+            </button>
+          )}
+
+          {/* Calendar popup — adapts to granularity */}
+          {showCalendar && (
+            <div
+              ref={calendarRef}
+              className="absolute top-full right-0 mt-1 z-30 w-64 p-3 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border shadow-xl"
+            >
+              {/* ── Header ── */}
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  onClick={() => {
+                    if (granularity === Granularity.Year) {
+                      setCalendarYear((y) => y - 9)
+                    } else if (granularity === Granularity.Month) {
+                      setCalendarYear((y) => y - 1)
+                    } else {
+                      if (calendarMonth === 0) { setCalendarYear((y) => y - 1); setCalendarMonth(11) }
+                      else setCalendarMonth((m) => m - 1)
+                    }
+                  }}
+                  className="p-0.5 rounded hover:bg-light-border/40 dark:hover:bg-dark-border/40"
+                >
+                  <ChevronLeft className="w-4 h-4 text-light-text-secondary dark:text-dark-text-secondary" />
+                </button>
+                <span className="text-sm font-semibold text-light-text dark:text-dark-text">
+                  {granularity === Granularity.Year
+                    ? `${calendarYear - 4} - ${calendarYear + 4}`
+                    : granularity === Granularity.Month
+                      ? `${calendarYear}年`
+                      : `${calendarYear}年${calendarMonth + 1}月`}
+                </span>
+                <button
+                  onClick={() => {
+                    if (granularity === Granularity.Year) {
+                      setCalendarYear((y) => y + 9)
+                    } else if (granularity === Granularity.Month) {
+                      setCalendarYear((y) => y + 1)
+                    } else {
+                      if (calendarMonth === 11) { setCalendarYear((y) => y + 1); setCalendarMonth(0) }
+                      else setCalendarMonth((m) => m + 1)
+                    }
+                  }}
+                  className="p-0.5 rounded hover:bg-light-border/40 dark:hover:bg-dark-border/40"
+                >
+                  <ChevronRight className="w-4 h-4 text-light-text-secondary dark:text-dark-text-secondary" />
+                </button>
+              </div>
+
+              {/* ── Day: date grid ── */}
+              {granularity === Granularity.Day && (
+                <>
+                  <div className="grid grid-cols-7 gap-0.5 mb-1">
+                    {WEEKDAY.map((w) => (
+                      <div key={w} className="text-center text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70 py-0.5">{w}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-0.5">
+                    {calCells.map((day, ci) => {
+                      if (day === null) return <div key={`e-${ci}`} className="aspect-square" />
+                      const dateKey = formatDate(calendarYear, calendarMonth, day)
+                      const isActive = dateKey === selectedDate
+                      const isToday = dateKey === `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
+                      return (
+                        <button
+                          key={dateKey}
+                          onClick={() => handleDateSelect(dateKey)}
+                          className={`aspect-square flex items-center justify-center rounded-lg text-xs font-medium transition-colors
+                            ${isActive ? 'bg-primary text-white dark:bg-primary-dark dark:text-white' : ''}
+                            ${!isActive && isToday ? 'ring-1 ring-primary/60 dark:ring-primary-dark/60' : ''}
+                            ${!isActive && !isToday ? 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/40 dark:hover:bg-dark-border/40' : ''}
+                          `}
+                        >
+                          {day}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* ── Week: month calendar with clickable week rows ── */}
+              {granularity === Granularity.Week && (
+                <>
+                  <div className="grid grid-cols-7 gap-0.5 mb-1">
+                    {WEEKDAY.map((w) => (
+                      <div key={w} className="text-center text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70 py-0.5">{w}</div>
+                    ))}
+                  </div>
+                  {/* Group cells into rows of 7 */}
+                  {Array.from({ length: Math.ceil(calCells.length / 7) }, (_, rowIdx) => {
+                    const rowCells = calCells.slice(rowIdx * 7, rowIdx * 7 + 7)
+                    // Find the Monday of this week row (first cell with a real date, or infer from context)
+                    const firstRealDay = rowCells.find((c): c is number => c !== null)
+                    if (firstRealDay === undefined) return null
+                    // Compute Monday: if firstRealDay is the first cell, it IS Monday (position 0 = Sunday in JS getDay, but our grid starts at Sunday column)
+                    // Actually, rowIdx 0 starts at `calFirstDay` column. We need the actual date of the Monday cell.
+                    // Monday is column 1 in our grid. If that cell has a date, use it; otherwise use first day minus offset.
+                    const monCell = rowCells[1] // column 1 = Monday
+                    let mondayDate: string | null = null
+                    if (monCell !== null && monCell !== undefined) {
+                      mondayDate = formatDate(calendarYear, calendarMonth, monCell)
+                    } else if (firstRealDay !== undefined) {
+                      // Monday is in prev/next month — approximate by computing from first visible day
+                      const firstDate = formatDate(calendarYear, calendarMonth, firstRealDay)
+                      const parts = firstDate.split('-').map(Number)
+                      const d = new Date(parts[0], parts[1] - 1, parts[2])
+                      const dayOfWeek = d.getDay()
+                      const diff = parts[2] - dayOfWeek + (dayOfWeek === 0 ? -6 : 1)
+                      const mon = new Date(parts[0], parts[1] - 1, diff)
+                      mondayDate = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`
+                    }
+                    if (!mondayDate) return null
+
+                    // Check if this week is the currently selected one
+                    const ref = selectedDate || `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
+                    const refParts = ref.split('-').map(Number)
+                    const refD = new Date(refParts[0], refParts[1] - 1, refParts[2])
+                    const refDow = refD.getDay()
+                    const refDiff = refParts[2] - refDow + (refDow === 0 ? -6 : 1)
+                    const refMon = new Date(refParts[0], refParts[1] - 1, refDiff)
+                    const refMonStr = `${refMon.getFullYear()}-${String(refMon.getMonth() + 1).padStart(2, '0')}-${String(refMon.getDate()).padStart(2, '0')}`
+                    const isActiveWeek = mondayDate === refMonStr
+
+                    return (
+                      <button
+                        key={rowIdx}
+                        onClick={() => handleDateSelect(mondayDate!)}
+                        className={`grid grid-cols-7 gap-0.5 w-full rounded-lg py-0.5 transition-colors
+                          ${isActiveWeek ? 'bg-primary/15 dark:bg-primary-dark/15 ring-1 ring-primary/40 dark:ring-primary-dark/40' : 'hover:bg-light-border/20 dark:hover:bg-dark-border/20'}
+                        `}
+                      >
+                        {rowCells.map((cell, ci) => (
+                          <div
+                            key={ci}
+                            className={`aspect-square flex items-center justify-center text-xs
+                              ${cell === null ? '' : 'font-medium'}
+                              ${isActiveWeek && cell !== null ? 'text-primary dark:text-primary-dark' : cell !== null ? 'text-light-text-secondary dark:text-dark-text-secondary' : ''}
+                            `}
+                          >
+                            {cell}
+                          </div>
+                        ))}
+                      </button>
+                    )
+                  })}
+                </>
+              )}
+
+              {/* ── Month: 4×3 grid ── */}
+              {granularity === Granularity.Month && (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'].map((name, mi) => {
+                    const ref = selectedDate || `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
+                    const refParts = ref.split('-').map(Number)
+                    const isCurrent = calendarYear === refParts[0] && mi === refParts[1] - 1
+                    const monthDate = `${calendarYear}-${String(mi + 1).padStart(2, '0')}-01`
+                    return (
+                      <button
+                        key={name}
+                        onClick={() => handleDateSelect(monthDate)}
+                        className={`py-2 rounded-lg text-xs font-medium transition-colors
+                          ${isCurrent ? 'bg-primary text-white dark:bg-primary-dark dark:text-white' : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/40 dark:hover:bg-dark-border/40'}
+                        `}
+                      >
+                        {name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* ── Year: 3×3 grid ── */}
+              {granularity === Granularity.Year && (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {Array.from({ length: 9 }, (_, i) => {
+                    const y = calendarYear - 4 + i
+                    const ref = selectedDate || `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
+                    const refYear = parseInt(ref.split('-')[0], 10)
+                    const isCurrent = y === refYear
+                    return (
+                      <button
+                        key={y}
+                        onClick={() => handleDateSelect(`${y}-01-01`)}
+                        className={`py-2 rounded-lg text-xs font-medium transition-colors
+                          ${isCurrent ? 'bg-primary text-white dark:bg-primary-dark dark:text-white' : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/40 dark:hover:bg-dark-border/40'}
+                        `}
+                      >
+                        {y}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Summary cards ── */}

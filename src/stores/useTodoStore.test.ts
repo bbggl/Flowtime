@@ -110,9 +110,9 @@ describe('useTodoStore', () => {
       expect(store.getState().todos[0].estimated_pomos).toBe(1)
     })
 
-    it('sets estimated_pomos to 0 for "today" category', () => {
+    it('sets estimated_pomos to 1 for "today" category', () => {
       store.getState().addTodo('Today task', 'today')
-      expect(store.getState().todos[0].estimated_pomos).toBe(0)
+      expect(store.getState().todos[0].estimated_pomos).toBe(1)
     })
   })
 

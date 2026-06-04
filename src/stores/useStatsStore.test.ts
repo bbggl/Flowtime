@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createStatsStore } from './useStatsStore'
 import { Granularity } from '../utils/stats'
 import type { PomodoroRecord } from '../types'
+
+const MOCK_NOW = new Date(2026, 5, 4, 12, 0, 0) // June 4, 2026
 
 function makeRecord(overrides: Partial<PomodoroRecord> = {}): PomodoroRecord {
   return {
@@ -11,8 +13,8 @@ function makeRecord(overrides: Partial<PomodoroRecord> = {}): PomodoroRecord {
     duration: 1500,
     actual_duration: 1500,
     status: 'completed',
-    started_at: '2026-06-01T10:00:00.000Z',
-    completed_at: '2026-06-01T10:25:00.000Z',
+    started_at: '2026-06-04T10:00:00.000Z',
+    completed_at: '2026-06-04T10:25:00.000Z',
     ...overrides,
   }
 }
@@ -21,7 +23,13 @@ describe('useStatsStore', () => {
   let store: ReturnType<typeof createStatsStore>
 
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(MOCK_NOW)
     store = createStatsStore()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   describe('初始状态', () => {
@@ -31,6 +39,19 @@ describe('useStatsStore', () => {
 
     it('has empty records initially', () => {
       expect(store.getState().records).toEqual([])
+    })
+  })
+
+  describe('selectedDate', () => {
+    it('defaults to null', () => {
+      expect(store.getState().selectedDate).toBeNull()
+    })
+
+    it('can set and clear selected date', () => {
+      store.getState().setSelectedDate('2026-06-01')
+      expect(store.getState().selectedDate).toBe('2026-06-01')
+      store.getState().setSelectedDate(null)
+      expect(store.getState().selectedDate).toBeNull()
     })
   })
 
@@ -96,14 +117,15 @@ describe('useStatsStore', () => {
 
   describe('趋势图数据 (Trend Data)', () => {
     it('returns grouped trend data', () => {
+      // Use today (June 4) — filterByGranularity now scopes to current period
       const records = [
-        makeRecord({ started_at: '2026-06-01T10:00:00.000Z', actual_duration: 1500 }),
-        makeRecord({ id: '2', started_at: '2026-06-02T10:00:00.000Z', actual_duration: 900 }),
+        makeRecord({ started_at: '2026-06-04T09:00:00.000Z', actual_duration: 1500 }),
+        makeRecord({ id: '2', started_at: '2026-06-04T14:00:00.000Z', actual_duration: 900 }),
       ]
       store.getState().setRecords(records)
       store.getState().setGranularity(Granularity.Day)
       const trend = store.getState().getTrendData()
-      expect(trend).toHaveLength(2)
+      expect(trend).toHaveLength(1) // one day → one group
     })
 
     it('returns empty array when no records', () => {

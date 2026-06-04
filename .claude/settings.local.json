@@ -19,7 +19,12 @@
       "Bash(gh auth *)",
       "Bash(npm run *)",
       "Bash(git remote *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(JSON.parse\\(require\\('fs'\\).readFileSync\\('package.json','utf8'\\)\\).scripts, null, 2\\)\\)\")",
+      "Bash(ls -la /d:/1/develop/myapp/)",
+      "Read(//d:/1/develop/**)",
+      "Read(//d:/1/develop/myapp/**)",
+      "Bash(git stash *)"
     ]
   }
 }

@@ -158,10 +158,44 @@ export default function Dashboard() {
   const dailyGoal = usePomodoroStore((s) => s.dailyGoal)
   const notes = useNotesStore((s) => s.notes)
 
-  const todoStats = useMemo(() => {
-    const done = todos.filter((t) => t.status === 'done').length
-    return { total: todos.length, done }
+  // Dashboard todo overview filter settings
+  const dashboardFilteredTodos = useMemo(() => {
+    const todayDate = todayStr()
+    // Read selected categories from localStorage
+    let selectedCats: string[]
+    try {
+      const raw = localStorage.getItem('flowtime-dashboard-categories')
+      selectedCats = raw ? (JSON.parse(raw) as string[]) : []
+    } catch {
+      selectedCats = []
+    }
+    // Default: show all categories if no selection saved
+    if (selectedCats.length === 0) return todos
+
+    // Read today sub-filter from localStorage
+    let todayFilter: string[]
+    try {
+      const raw = localStorage.getItem('flowtime-dashboard-today-filter')
+      todayFilter = raw ? (JSON.parse(raw) as string[]) : ['today', 'future', 'past']
+    } catch {
+      todayFilter = ['today', 'future', 'past']
+    }
+
+    return todos.filter((t) => {
+      if (!selectedCats.includes(t.category)) return false
+      if (t.category === 'today' && t.date) {
+        if (t.date === todayDate && !todayFilter.includes('today')) return false
+        if (t.date > todayDate && !todayFilter.includes('future')) return false
+        if (t.date < todayDate && !todayFilter.includes('past')) return false
+      }
+      return true
+    })
   }, [todos])
+
+  const todoStats = useMemo(() => {
+    const done = dashboardFilteredTodos.filter((t) => t.status === 'done').length
+    return { total: dashboardFilteredTodos.length, done }
+  }, [dashboardFilteredTodos])
 
   const recentNotes = useMemo(
     () =>
@@ -546,6 +580,12 @@ export default function Dashboard() {
             if (todos.some((t) => t.date === key)) dateHasTodos.add(key)
           }
 
+          // Build set of (YYYY-MM) keys that have todos — for month picker dots
+          const monthsWithTodos = new Set<string>()
+          for (const t of todos) {
+            if (t.date) monthsWithTodos.add(t.date.slice(0, 7))
+          }
+
           return (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
@@ -595,17 +635,23 @@ export default function Dashboard() {
                             </button>
                           </div>
                           <div className="grid grid-cols-4 gap-1">
-                            {MONTHS.map((name, mi) => (
+                            {MONTHS.map((name, mi) => {
+                              const hasTodos = monthsWithTodos.has(`${pickerYear}-${String(mi + 1).padStart(2, '0')}`)
+                              return (
                               <button
                                 key={name}
                                 onClick={() => { setPickerMonth(mi); setShowMonthPicker(false); }}
-                                className={`py-1 rounded text-[10px] font-medium transition-colors
+                                className={`relative py-1 rounded text-[10px] font-medium transition-colors
                                   ${mi === pickerMonth ? 'bg-primary text-white dark:bg-primary-dark' : 'text-light-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'}
                                 `}
                               >
                                 {name}
+                                {hasTodos && (
+                                  <span className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${mi === pickerMonth ? 'bg-white/70' : 'bg-primary/60 dark:bg-primary-dark/60'}`} />
+                                )}
                               </button>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       )}

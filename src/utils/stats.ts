@@ -9,6 +9,49 @@ export const Granularity = {
 
 export type Granularity = (typeof Granularity)[keyof typeof Granularity]
 
+/** Filter records to only the given time range for the specified granularity.
+ *  When `referenceDate` is provided (YYYY-MM-DD), uses it as the reference point;
+ *  otherwise defaults to "now". */
+export function filterByGranularity(
+  records: PomodoroRecord[],
+  granularity: Granularity,
+  referenceDate?: string | null,
+): PomodoroRecord[] {
+  const now = referenceDate
+    ? (([y, m, d]) => new Date(y, m - 1, d))(referenceDate.split('-').map(Number))
+    : new Date()
+  let start: Date
+  let end: Date
+
+  switch (granularity) {
+    case Granularity.Day:
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      break
+    case Granularity.Week: {
+      const day = now.getDay()
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1) // Monday
+      start = new Date(now.getFullYear(), now.getMonth(), diff)
+      end = new Date(now.getFullYear(), now.getMonth(), diff + 7) // Next Monday
+      break
+    }
+    case Granularity.Month:
+      start = new Date(now.getFullYear(), now.getMonth(), 1)
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+      break
+    case Granularity.Year:
+      start = new Date(now.getFullYear(), 0, 1)
+      end = new Date(now.getFullYear() + 1, 0, 1)
+      break
+  }
+
+  return records.filter((r) => {
+    const d = new Date(r.started_at)
+    d.setHours(0, 0, 0, 0)
+    return d >= start && d < end
+  })
+}
+
 export function calculateTotalFocusTime(records: PomodoroRecord[]): number {
   return records
     .filter((r) => r.mode === 'work' && r.status === 'completed')
@@ -64,7 +107,8 @@ export function groupRecordsByGranularity(
   records: PomodoroRecord[],
   granularity: Granularity,
 ): GroupedRecords[] {
-  const workRecords = records.filter((r) => r.mode === 'work' && r.status === 'completed')
+  const scoped = filterByGranularity(records, granularity)
+  const workRecords = scoped.filter((r) => r.mode === 'work' && r.status === 'completed')
   const groups = new Map<string, number>()
 
   for (const record of workRecords) {

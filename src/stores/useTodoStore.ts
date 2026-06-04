@@ -57,6 +57,7 @@ interface TodoState {
   deleteCategory: (name: string) => void
   setCurrentCategory: (category: string) => void
   setSelectedDate: (date: string | null) => void
+  reorderTodos: (fromIndex: number, toIndex: number) => void
 
   // Computed helpers
   getFilteredTodos: () => Todo[]
@@ -94,6 +95,7 @@ export const createTodoStore = (supabase: SupabaseClient) => {
         const { data, error } = await supabase
           .from('todos')
           .select('*')
+          .order('sort_order', { ascending: true })
           .order('created_at', { ascending: false })
 
         if (!error && data) {
@@ -155,6 +157,7 @@ export const createTodoStore = (supabase: SupabaseClient) => {
         date: category === 'today' ? (get().selectedDate || todayStr()) : undefined,
         estimated_pomos: 0,
         completed_pomos: 0,
+        sort_order: 0,
         created_at: new Date().toISOString(),
         completed_at: undefined,
       }
@@ -175,6 +178,7 @@ export const createTodoStore = (supabase: SupabaseClient) => {
           date: todo.date ?? null,
           estimated_pomos: todo.estimated_pomos,
           completed_pomos: todo.completed_pomos,
+          sort_order: todo.sort_order,
         })
         .select()
         .single()
@@ -362,6 +366,25 @@ export const createTodoStore = (supabase: SupabaseClient) => {
 
     setSelectedDate(date) {
       set({ selectedDate: date })
+    },
+
+    reorderTodos(fromIndex, toIndex) {
+      const todos = [...get().todos]
+      const [item] = todos.splice(fromIndex, 1)
+      todos.splice(toIndex, 0, item)
+
+      // Reassign sequential sort_order
+      const updated = todos.map((t, i) => ({ ...t, sort_order: i }))
+      set({ todos: updated })
+
+      // Sync to Supabase (fire-and-forget, batch updates)
+      if (isRealSupabase) {
+        Promise.all(
+          updated.map((t) =>
+            supabase.from('todos').update({ sort_order: t.sort_order }).eq('id', t.id),
+          ),
+        ).catch((err) => console.warn('Reorder sync failed:', err))
+      }
     },
 
     // ---- Realtime sync handlers (Task 9) ----

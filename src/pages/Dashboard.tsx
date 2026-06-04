@@ -282,6 +282,15 @@ export default function Dashboard() {
     [todos, countdownTodoIds],
   )
 
+  // Clean up orphaned countdown IDs that no longer match any todo
+  useEffect(() => {
+    if (todos.length === 0) return
+    setCountdownTodoIds((prev) => {
+      const valid = prev.filter((id) => todos.some((t) => t.id === id))
+      return valid.length !== prev.length ? valid : prev
+    })
+  }, [todos])
+
   // Compute days and color for a given todo (timezone-safe)
   function getCountdownDays(todo: Todo): number | null {
     if (!todo.date) return null
@@ -326,8 +335,14 @@ export default function Dashboard() {
     }
   }
 
-  // Drag-and-drop reorder
-  const dragIdxRef = useRef<number | null>(null)
+  // Drag-and-drop reorder with "dodge" animation
+  const dragIdxRef = useRef<number | null>(null) // current rawIdx of the tile being dragged
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null) // for 3px threshold
+  const dragGrabRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 }) // grab offset within element
+  const dragTileRef = useRef<HTMLElement | null>(null)
+  const dragScrollRef = useRef<HTMLElement | null>(null) // scroll container to unclip
+  const lastReorderTimeRef = useRef(0)
+  const countdownDropRef = useRef(false)
   const moveCountdown = useCallback((from: number, to: number) => {
     setCountdownTodoIds((prev) => {
       const next = [...prev]
@@ -491,44 +506,124 @@ export default function Dashboard() {
               const days = getCountdownDays(todo)
               const color = getCountdownColor(todo)
               const isDone = todo.status === 'done'
+              const rawIdx = countdownTodoIds.indexOf(todo.id)
               return (
                 <div
                   key={todo.id}
-                  onDragOver={(e) => {
-                    e.preventDefault()
-                    e.dataTransfer.dropEffect = 'move'
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    const from = dragIdxRef.current
-                    if (from !== null && from !== idx) {
-                      moveCountdown(from, idx)
-                    }
-                    dragIdxRef.current = null
-                  }}
-                  onClick={() => {
-                    if (todo.date) {
-                      useTodoStore.getState().setSelectedDate(todo.date)
-                    }
-                    navigate('/todo')
-                  }}
-                  className="relative flex-shrink-0 h-full aspect-square rounded-xl border border-light-border dark:border-dark-border bg-light-bg dark:bg-dark-bg flex flex-col items-center justify-center gap-0.5 p-2 group select-none cursor-pointer hover:shadow-md transition-shadow"
+                  data-countdown-tile
+                  data-countdown-idx={idx}
+                  data-countdown-raw-idx={rawIdx}
+                  className="relative flex-shrink-0 h-full aspect-square rounded-xl border border-light-border dark:border-dark-border bg-light-bg dark:bg-dark-bg flex flex-col items-center justify-center gap-0.5 p-2 group select-none transition-transform duration-200 ease-out"
                 >
-                  {/* Drag handle — only this area is draggable */}
+                  {/* Drag handle — top-left corner, initiates drag via mousedown */}
                   <div
-                    draggable
-                    onDragStart={(e) => {
-                      dragIdxRef.current = idx
-                      e.dataTransfer.effectAllowed = 'move'
-                      ;(e.currentTarget as HTMLElement).closest('.aspect-square')?.setAttribute('style', 'opacity:0.5')
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      const tile = (e.currentTarget as HTMLElement).closest('[data-countdown-tile]') as HTMLElement
+                      if (!tile) return
+                      dragIdxRef.current = rawIdx
+                      dragStartRef.current = { x: e.clientX, y: e.clientY }
+
+                      // Record grab offset (cursor position relative to tile top-left)
+                      const startRect = tile.getBoundingClientRect()
+                      dragGrabRef.current = {
+                        x: e.clientX - startRect.left,
+                        y: e.clientY - startRect.top,
+                      }
+                      dragTileRef.current = tile
+
+                      // Unclip: remove overflow from the scroll container
+                      const scrollContainer = tile.closest('.overflow-x-auto') as HTMLElement | null
+                      if (scrollContainer) {
+                        dragScrollRef.current = scrollContainer
+                        scrollContainer.style.overflow = 'visible'
+                      }
+
+                      lastReorderTimeRef.current = 0
+
+                      // Lift the dragged tile
+                      tile.style.transition = 'none'
+                      tile.style.pointerEvents = 'none'
+                      tile.style.zIndex = '30'
+                      tile.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)'
+
+                      let wasDragged = false
+
+                      const applyTransform = (cx: number, cy: number) => {
+                        // Read natural position (without transform) to compute correct offset
+                        const saved = tile.style.transform
+                        tile.style.transform = ''
+                        const naturalRect = tile.getBoundingClientRect()
+                        tile.style.transform = saved
+                        const dx = cx - dragGrabRef.current.x - naturalRect.left
+                        const dy = cy - dragGrabRef.current.y - naturalRect.top
+                        tile.style.transform = `translate(${dx}px, ${dy}px) scale(1.05)`
+                      }
+
+                      const onMouseMove = (ev: MouseEvent) => {
+                        const dx = ev.clientX - dragStartRef.current!.x
+                        const dy = ev.clientY - dragStartRef.current!.y
+
+                        if (!wasDragged && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+                          wasDragged = true
+                        }
+
+                        if (!wasDragged) return
+
+                        // Follow cursor (recalculates offset to account for layout changes from reorder)
+                        applyTransform(ev.clientX, ev.clientY)
+
+                        // Find which tile is under the cursor (skips dragged tile: pointer-events:none)
+                        const targetEl = document.elementFromPoint(ev.clientX, ev.clientY)
+                        const targetTile = targetEl?.closest('[data-countdown-tile]') as HTMLElement | null
+
+                        if (targetTile) {
+                          const targetRawIdx = Number(targetTile.dataset.countdownRawIdx)
+                          if (targetRawIdx !== dragIdxRef.current && Date.now() - lastReorderTimeRef.current > 60) {
+                            const from = dragIdxRef.current!
+                            moveCountdown(from, targetRawIdx)
+                            lastReorderTimeRef.current = Date.now()
+                            dragIdxRef.current = targetRawIdx
+                          }
+                        }
+                      }
+
+                      const onMouseUp = () => {
+                        document.removeEventListener('mousemove', onMouseMove)
+                        document.removeEventListener('mouseup', onMouseUp)
+
+                        // Restore scroll container overflow
+                        if (dragScrollRef.current) {
+                          dragScrollRef.current.style.overflow = ''
+                          dragScrollRef.current = null
+                        }
+
+                        if (wasDragged) {
+                          countdownDropRef.current = true
+                        }
+
+                        // Snap back with transition
+                        tile.style.transition = 'transform 0.2s ease-out'
+                        tile.style.transform = ''
+                        tile.style.pointerEvents = ''
+                        tile.style.zIndex = ''
+                        tile.style.boxShadow = ''
+
+                        setTimeout(() => {
+                          tile.style.transition = ''
+                        }, 220)
+
+                        dragIdxRef.current = null
+                        dragStartRef.current = null
+                        dragTileRef.current = null
+                      }
+
+                      document.addEventListener('mousemove', onMouseMove)
+                      document.addEventListener('mouseup', onMouseUp)
                     }}
-                    onDragEnd={(e) => {
-                      dragIdxRef.current = null
-                      ;(e.currentTarget as HTMLElement).closest('.aspect-square')?.removeAttribute('style')
-                    }}
-                    className="absolute top-1 left-1 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab active:cursor-grabbing"
+                    className="absolute top-0 left-0 w-7 h-7 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing z-10 rounded-tl-xl"
                   >
-                    <svg className="w-3 h-3 text-light-text-secondary dark:text-dark-text-secondary" viewBox="0 0 24 24" fill="currentColor">
+                    <svg className="w-4 h-4 text-light-text-secondary/50 dark:text-dark-text-secondary/50" viewBox="0 0 24 24" fill="currentColor">
                       <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
                       <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
                       <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
@@ -537,7 +632,7 @@ export default function Dashboard() {
 
                   {/* Done checkmark — bottom-right */}
                   {isDone && (
-                    <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                    <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center z-20">
                       <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
@@ -547,27 +642,39 @@ export default function Dashboard() {
                   {/* Remove button */}
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRemoveClick(todo.id, todo.title); }}
-                    className="absolute top-1 right-1 p-0.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
+                    className="absolute top-1 right-1 p-0.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all z-20"
                     title="移除倒计时"
                   >
                     <X className="w-3 h-3 text-light-text-secondary/50 dark:text-dark-text-secondary/50 hover:text-red-400" />
                   </button>
 
-                  <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
-                    距离
-                  </span>
-                  <span className="text-[10px] font-medium text-light-text dark:text-dark-text truncate max-w-full px-1 text-center leading-tight">
-                    {todo.title}
-                  </span>
-                  <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
-                    还有
-                  </span>
-                  <span className={`text-2xl font-bold tabular-nums leading-none ${color.base} ${color.opacity}`}>
-                    {days !== null ? (days < 0 ? days : Math.abs(days)) : '--'}
-                  </span>
-                  <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
-                    天
-                  </span>
+                  <button
+                    onClick={() => {
+                      if (countdownDropRef.current) { countdownDropRef.current = false; return }
+                      if (todo.date) {
+                        useTodoStore.getState().setSelectedDate(todo.date)
+                      }
+                      useTodoStore.getState().setCurrentCategory('today')
+                      navigate('/todo')
+                    }}
+                    className="flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
+                  >
+                    <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
+                      距离
+                    </span>
+                    <span className="text-[10px] font-medium text-light-text dark:text-dark-text truncate max-w-full px-1 text-center leading-tight">
+                      {todo.title}
+                    </span>
+                    <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
+                      还有
+                    </span>
+                    <span className={`text-2xl font-bold tabular-nums leading-none ${color.base} ${color.opacity}`}>
+                      {days !== null ? (days < 0 ? days : Math.abs(days)) : '--'}
+                    </span>
+                    <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
+                      天
+                    </span>
+                  </button>
                 </div>
               )
             })}

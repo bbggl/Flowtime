@@ -70,6 +70,7 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
     category: 'work',
     estimated_pomos: 1,
     completed_pomos: 0,
+    sort_order: 0,
     created_at: new Date().toISOString(),
     ...overrides,
   }

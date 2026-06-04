@@ -24,7 +24,32 @@
       "Bash(ls -la /d:/1/develop/myapp/)",
       "Read(//d:/1/develop/**)",
       "Read(//d:/1/develop/myapp/**)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(git log *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://mcp.supabase.com/mcp\")",
+      "WebFetch(domain:supabase.com)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.answeroverflow.com)",
+      "Bash(claude /mcp)",
+      "Bash(codegraph init *)",
+      "mcp__codegraph__codegraph_explore",
+      "Bash(netstat -ano)",
+      "Bash(tasklist)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_type",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "mcp__plugin_playwright_playwright__browser_drag",
+      "mcp__plugin_playwright_playwright__browser_hover",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "mcp__plugin_playwright_playwright__browser_run_code_unsafe"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }

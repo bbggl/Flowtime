@@ -9,6 +9,7 @@ export interface Todo {
   date?: string
   estimated_pomos: number
   completed_pomos: number
+  sort_order: number
   created_at: string
   completed_at?: string
 }

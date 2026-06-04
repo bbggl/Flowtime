@@ -261,6 +261,7 @@ export default function Todo() {
   const changePriority = useTodoStore((s) => s.changePriority)
   const changeEstimatedPomos = useTodoStore((s) => s.changeEstimatedPomos)
   const deleteTodo = useTodoStore((s) => s.deleteTodo)
+  const reorderTodos = useTodoStore((s) => s.reorderTodos)
   const createCategory = useTodoStore((s) => s.createCategory)
   const renameCategory = useTodoStore((s) => s.renameCategory)
   const deleteCategory = useTodoStore((s) => s.deleteCategory)
@@ -340,6 +341,15 @@ export default function Todo() {
 
   // The store already filters by date for "today" view (with selectedDate support)
   const displayTodos = filteredTodos
+
+  // Drag-and-drop with "dodge" animation
+  const dragSourceDisplayIdxRef = useRef<number | null>(null)
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null) // for 3px threshold
+  const dragGrabRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 }) // grab offset within element
+  const dragTileRef = useRef<HTMLElement | null>(null)
+  const dragScrollRef = useRef<HTMLElement | null>(null)
+  const lastReorderTimeRef = useRef(0)
+  const todoDropRef = useRef(false)
 
   // --- Handlers ---
   const handleAdd = useCallback(() => {
@@ -646,7 +656,7 @@ export default function Todo() {
           </div>
         ) : (
           <div className="space-y-3">
-            {displayTodos.map((todo) => {
+            {displayTodos.map((todo, displayIdx) => {
               const isDone = todo.status === 'done'
               const isDeleting = deletingIds.has(todo.id)
               const isEntering = enteringIds.has(todo.id)
@@ -655,16 +665,149 @@ export default function Todo() {
               return (
                 <div
                   key={todo.id}
-                  className={`group flex flex-col gap-1.5 px-4 py-3 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border transition-shadow hover:shadow-sm
+                  data-todo-item
+                  data-todo-id={todo.id}
+                  data-todo-display-idx={displayIdx}
+                  className={`group relative flex flex-col gap-1.5 pl-10 pr-4 py-3 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border transition-shadow hover:shadow-sm transition-transform duration-200 ease-out
                     ${isEntering ? 'todo-enter' : ''}
                     ${isDeleting ? 'todo-leave' : ''}
                   `}
                 >
+                  {/* Drag handle */}
+                  <div
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      const itemEl = (e.currentTarget as HTMLElement).closest('[data-todo-item]') as HTMLElement
+                      if (!itemEl) return
+                      dragSourceDisplayIdxRef.current = displayIdx
+                      dragStartRef.current = { x: e.clientX, y: e.clientY }
+
+                      // Record grab offset (cursor position relative to item top-left)
+                      const startRect = itemEl.getBoundingClientRect()
+                      dragGrabRef.current = {
+                        x: e.clientX - startRect.left,
+                        y: e.clientY - startRect.top,
+                      }
+                      dragTileRef.current = itemEl
+
+                      // Unclip: remove overflow from the scroll container
+                      const scrollContainer = itemEl.closest('.overflow-y-auto') as HTMLElement | null
+                      if (scrollContainer) {
+                        dragScrollRef.current = scrollContainer
+                        scrollContainer.style.overflow = 'visible'
+                      }
+
+                      lastReorderTimeRef.current = 0
+
+                      // Lift the dragged item
+                      itemEl.style.transition = 'none'
+                      itemEl.style.pointerEvents = 'none'
+                      itemEl.style.zIndex = '30'
+                      itemEl.style.boxShadow = '0 8px 25px rgba(0,0,0,0.12)'
+
+                      let wasDragged = false
+
+                      const applyTransform = (cx: number, cy: number) => {
+                        const el = dragTileRef.current
+                        if (!el) return
+                        const saved = el.style.transform
+                        el.style.transform = ''
+                        const naturalRect = el.getBoundingClientRect()
+                        el.style.transform = saved
+                        const dx = cx - dragGrabRef.current.x - naturalRect.left
+                        const dy = cy - dragGrabRef.current.y - naturalRect.top
+                        el.style.transform = `translate(${dx}px, ${dy}px)`
+                      }
+
+                      const onMouseMove = (ev: MouseEvent) => {
+                        if (!dragStartRef.current || !dragTileRef.current) return
+                        const dx = ev.clientX - dragStartRef.current.x
+                        const dy = ev.clientY - dragStartRef.current.y
+
+                        if (!wasDragged && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+                          wasDragged = true
+                        }
+
+                        if (!wasDragged) return
+
+                        // Follow cursor (recalculates offset to account for layout changes from reorder)
+                        applyTransform(ev.clientX, ev.clientY)
+
+                        // Find which item is under the cursor (skips dragged item: pointer-events:none)
+                        const targetEl = document.elementFromPoint(ev.clientX, ev.clientY)
+                        const targetItem = targetEl?.closest('[data-todo-item]') as HTMLElement | null
+
+                        if (targetItem) {
+                          const targetDisplayIdx = Number(targetItem.dataset.todoDisplayIdx)
+                          if (targetDisplayIdx !== dragSourceDisplayIdxRef.current && Date.now() - lastReorderTimeRef.current > 60) {
+                            const sourceId = dragTileRef.current.dataset.todoId
+                            const targetId = targetItem.dataset.todoId
+                            if (sourceId && targetId) {
+                              const store = useTodoStore.getState()
+                              const fromFull = store.todos.findIndex((t) => t.id === sourceId)
+                              const toFull = store.todos.findIndex((t) => t.id === targetId)
+                              if (fromFull !== -1 && toFull !== -1 && fromFull !== toFull) {
+                                reorderTodos(fromFull, toFull)
+                                lastReorderTimeRef.current = Date.now()
+                                dragSourceDisplayIdxRef.current = targetDisplayIdx
+                              }
+                            }
+                          }
+                        }
+                      }
+
+                      const onMouseUp = () => {
+                        document.removeEventListener('mousemove', onMouseMove)
+                        document.removeEventListener('mouseup', onMouseUp)
+
+                        // Restore scroll container overflow
+                        if (dragScrollRef.current) {
+                          dragScrollRef.current.style.overflow = ''
+                          dragScrollRef.current = null
+                        }
+
+                        if (wasDragged) {
+                          todoDropRef.current = true
+                        }
+
+                        const draggedEl = dragTileRef.current
+                        if (draggedEl) {
+                          draggedEl.style.transition = 'transform 0.2s ease-out'
+                          draggedEl.style.transform = ''
+                          draggedEl.style.pointerEvents = ''
+                          draggedEl.style.zIndex = ''
+                          draggedEl.style.boxShadow = ''
+
+                          setTimeout(() => {
+                            draggedEl.style.transition = ''
+                          }, 220)
+                        }
+
+                        dragSourceDisplayIdxRef.current = null
+                        dragStartRef.current = null
+                        dragTileRef.current = null
+                      }
+
+                      document.addEventListener('mousemove', onMouseMove)
+                      document.addEventListener('mouseup', onMouseUp)
+                    }}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-30 transition-opacity cursor-grab active:cursor-grabbing p-0.5"
+                  >
+                    <svg className="w-4 h-4 text-light-text-secondary dark:text-dark-text-secondary" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
+                      <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+                      <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+                    </svg>
+                  </div>
+
                   {/* Top row: checkbox + title + inline actions */}
                   <div className="flex items-center gap-3">
                     {/* Checkbox */}
                     <button
-                      onClick={() => toggleTodo(todo.id)}
+                      onClick={() => {
+                        if (todoDropRef.current) { todoDropRef.current = false; return }
+                        toggleTodo(todo.id)
+                      }}
                       className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all duration-200
                         ${
                           isDone

@@ -33,3 +33,8 @@ tsconfig.tsbuildinfo
 # Project-specific
 .superpowers/
 deploy/
+
+# Tool caches
+.codegraph/
+.playwright-mcp/
+*.pen

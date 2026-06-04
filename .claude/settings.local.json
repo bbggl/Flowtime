@@ -45,7 +45,9 @@
       "mcp__plugin_playwright_playwright__browser_drag",
       "mcp__plugin_playwright_playwright__browser_hover",
       "mcp__plugin_playwright_playwright__browser_wait_for",
-      "mcp__plugin_playwright_playwright__browser_run_code_unsafe"
+      "mcp__plugin_playwright_playwright__browser_run_code_unsafe",
+      "Bash(ls -la \"D:/1/develop/easy-vibe/\" 2>/dev/null || echo \"目录不存在\")",
+      "Read(//d/1/develop/easy-vibe/**)"
     ]
   },
   "enableAllProjectMcpServers": true,

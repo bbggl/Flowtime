@@ -361,7 +361,7 @@ export default function Settings() {
           关于
         </h2>
         <a
-          href={`${window.location.origin}/easy-vibe`}
+          href={`${window.location.origin}/easy-vibe/`}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-light-border dark:border-dark-border text-sm font-medium text-light-text dark:text-dark-text hover:bg-light-bg dark:hover:bg-dark-bg transition-colors"

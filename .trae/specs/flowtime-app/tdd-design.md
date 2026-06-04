@@ -33,8 +33,10 @@ npm run test:watch  # watch 模式（TDD 循环用）
 ```
 src/
 ├── __tests__/
-│   ├── setup.ts              # 全局 setup：jest-dom matchers 注册
-│   └── supabase-test.ts      # 测试用 Supabase 客户端初始化
+│   ├── setup.ts                # 全局 setup：jest-dom matchers 注册
+│   ├── supabase-auth.test.ts   # Supabase 认证测试
+│   ├── supabase-schema.test.ts # Supabase 表结构测试
+│   └── stats-filter.test.ts    # 统计时间范围筛选测试
 ├── utils/
 │   ├── time.ts
 │   ├── time.test.ts
@@ -46,7 +48,9 @@ src/
 │   ├── usePomodoroStore.ts
 │   ├── usePomodoroStore.test.ts
 │   ├── useNotesStore.ts
-│   └── useNotesStore.test.ts
+│   ├── useNotesStore.test.ts
+│   ├── useStatsStore.ts
+│   └── useStatsStore.test.ts
 └── hooks/
     ├── usePomodoroTimer.ts
     └── usePomodoroTimer.test.ts
@@ -83,7 +87,7 @@ src/
 3. 逐个实现场景 → 逐批 Green
 ```
 
-`usePomodoroTimer` 测试骨架（8 个 Scenario）：
+`usePomodoroTimer` 测试骨架（9 个 Scenario）：
 
 ```
 describe('usePomodoroTimer', () => {
@@ -93,8 +97,21 @@ describe('usePomodoroTimer', () => {
   describe('跳过',       () => { /* 记录 interrupted 状态，不计入任务统计 */ })
   describe('重置',       () => { /* 回到初始值，状态 IDLE */ })
   describe('模式切换',   () => { /* 重置为对应时长 + 模式标签高亮 */ })
-  describe('关联任务',   () => { /* 下拉选择 + 自由专注 */ })
+  describe('关联任务',   () => { /* 下拉选择 + 自由专注 + 点击外部关闭 */ })
   describe('今日统计',   () => { /* 番茄图标数 + 总专注时长 */ })
+})
+```
+
+`useStatsStore` 测试骨架（新增时间范围筛选场景）：
+
+```
+describe('useStatsStore', () => {
+  describe('粒度切换',       () => { /* 日/周/月/年 */ })
+  describe('时间范围筛选',   () => { /* selectedDate + filterByGranularity */ })
+  describe('概览指标',       () => { /* 4 指标随粒度和日期变化 */ })
+  describe('趋势数据',       () => { /* duration/count 切换 */ })
+  describe('任务分布',       () => { /* Top 5 + 其他，随筛选范围变化 */ })
+  describe('loadRecords',    () => { /* 从 Supabase 加载 */ })
 })
 ```
 
@@ -157,7 +174,9 @@ afterEach  → DELETE WHERE user_id = testUserId
 
 - [ ] `npm test` 命令可运行，输出全部通过
 - [ ] 每个 Store 的 action 至少有一个测试
-- [ ] usePomodoroTimer 的 8 个 Scenario 全部有对应测试
-- [ ] useStatsStore 的 4 个粒度切换有对应测试
+- [ ] usePomodoroTimer 的 9 个 Scenario 全部有对应测试（含点击外部关闭下拉）
+- [ ] useStatsStore 的时间范围筛选（filterByGranularity）有完整测试覆盖
+- [ ] stats-filter.test.ts：统计页粒度 + 日历选择器的核心逻辑测试通过
 - [ ] usePomodoroStore 的番茄完成/跳过/任务关联有对应测试
+- [ ] useTodoStore 的 changeEstimatedPomos、renameCategory、deleteCategory 有测试
 - [ ] 测试使用真实 Supabase 测试项目，afterEach 清理数据

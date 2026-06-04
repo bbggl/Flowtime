@@ -71,6 +71,29 @@
 - **WHEN** 用户尚无任何待办和番茄记录
 - **THEN** 显示引导文案"暂无数据，开始你的第一个番茄吧！"
 
+#### Scenario: 编辑首页标题
+- **WHEN** 用户点击仪表盘问候标题
+- **THEN** 标题变为可编辑输入框，支持 Enter 保存、Escape 取消、blur 保存
+- **AND** 自定义标题持久化到 Supabase `user_settings.greeting_text`，并用 localStorage 做离线缓存
+- **WHEN** 鼠标悬停在标题上
+- **THEN** 显示铅笔编辑图标（Pencil）
+
+#### Scenario: 目标倒计时
+- **WHEN** 用户查看仪表盘
+- **THEN** Card 4 显示"目标倒计时"模块，包含可添加多个倒计时方块
+- **AND** 每块显示关联待办标题 + 距离天数 + 颜色（优先级 + 剩余天数决定透明度：≤3天100%、≤7天80%、≤14天60%、≤30天40%、>30天25%）
+- **AND** 高优先级橙色、中优先级紫色、低优先级灰色
+- **AND** 支持拖拽排序
+- **AND** 鼠标悬停显示拖拽手柄和删除按钮（X）
+- **AND** 点击加号弹出日历选择器，筛选有日期的待办任务添加
+- **AND** 倒计时数据持久化到 Supabase `user_settings.countdown_todo_ids` + localStorage
+
+#### Scenario: 待办概览分类筛选
+- **WHEN** 用户在设置页勾选/取消仪表盘分类
+- **THEN** 仪表盘待办概览卡片仅显示所选分类的待办
+- **AND** 今天分类附加子筛选：今天的待办、未来的待办、过去的待办（可单独开关）
+- **AND** 设置默认全选，保存到 localStorage `flowtime-dashboard-categories`
+
 ---
 
 ### Requirement: 待办事项
@@ -123,6 +146,28 @@
 - **THEN** 弹出输入框创建新分类
 - **AND** 新分类出现在筛选栏末尾
 
+#### Scenario: 重命名分类
+- **WHEN** 用户双击自定义分类名称
+- **THEN** 分类名变为可编辑输入框，Enter 确认、Escape 取消
+- **AND** 重命名后所有属于该分类的待办同步更新
+- **AND** 分类名称持久化到 Supabase `categories` 和 `todos` 表
+
+#### Scenario: 删除分类
+- **WHEN** 用户点击自定义分类旁的删除按钮
+- **THEN** 弹出确认对话框"确定要删除分类及其所有待办吗？"
+- **AND** 确认后删除分类和所有属于该分类的待办
+- **AND** 若当前正在查看被删除的分类，自动切回"今天"
+
+#### Scenario: 预计番茄数轮转
+- **WHEN** 用户点击关联番茄任务的番茄数
+- **THEN** 预计番茄数按 1→2→3→4→5→6→7→8→0→1 循环轮转
+- **AND** 当 estimated_pomos 为 0 时，番茄数不显示
+
+#### Scenario: 选择月份跳转
+- **WHEN** 用户点击"今天"底部日历标题
+- **THEN** 弹出年选择器 + 月网格（4×3），支持年份前后翻页
+- **AND** 有待办的月份显示小圆点标记
+
 #### Scenario: 空列表
 - **WHEN** 当前分类下无任务
 - **THEN** 显示"还没有任务，添加第一个吧！"
@@ -171,6 +216,8 @@
 - **WHEN** 用户点击底部任务卡片
 - **THEN** 展开下拉列表，可从 pending 任务中选择关联
 - **AND** 支持选择"自由专注"取消关联
+- **WHEN** 点击卡片外部区域
+- **THEN** 下拉列表自动关闭
 - **WHEN** 无关联任务
 - **THEN** 卡片显示"无关联任务 — 自由专注"
 
@@ -185,7 +232,7 @@
 
 #### Scenario: 笔记列表
 - **WHEN** 用户打开笔记页
-- **THEN** 左侧显示所有笔记列表，默认选中第一条
+- **THEN** 左侧显示所有笔记列表（标题 + 时间），默认选中第一条
 - **AND** 支持搜索框实时过滤（标题模糊匹配）
 
 #### Scenario: 新建笔记
@@ -209,20 +256,37 @@
 ---
 
 ### Requirement: 统计详情
-系统 SHALL 提供数据统计页面，支持日/周/月/年粒度切换，展示概览指标、趋势图和任务分布。
+系统 SHALL 提供数据统计页面，支持日/周/月/年粒度切换和时间范围筛选，展示概览指标、趋势图和任务分布。
 
 #### Scenario: 粒度切换
 - **WHEN** 用户点击粒度切换按钮
 - **THEN** 选中按钮高亮，所有图表同步切换到对应粒度
 - **AND** 默认选中"周"
 
+#### Scenario: 时间范围筛选
+- **WHEN** 用户点击标题栏右侧日历图标按钮
+- **THEN** 弹出日历选择器，UI 根据当前粒度自适应：
+  - 日粒度：标准月历网格，点击选择具体日期
+  - 周粒度：月历按行分组为周，点击选中整周
+  - 月粒度：4×3 月份网格，点击选中整月
+  - 年粒度：3×3 年份网格（显示当年±4年），点击选中整年
+- **AND** 选中后弹窗关闭，所有统计数据重新计算为该时间范围的数据
+- **AND** 按钮旁显示当前选中时间范围的格式化标签（如"6/4", "5/26 - 6/1", "2026年6月", "2026年"）
+- **AND** 点击外部区域关闭弹窗
+
+#### Scenario: 返回今天
+- **WHEN** 用户已选择一个历史时间范围
+- **THEN** 日历按钮旁显示"返回今天"链接
+- **AND** 点击后恢复为当前时间范围（selectedDate = null）
+
 #### Scenario: 概览卡片
 - **WHEN** 用户查看统计页
 - **THEN** 显示 4 个等宽卡片：总专注时长（分钟）、完成番茄数、日均番茄数、完成率
+- **AND** 所有指标仅在选定时间范围内计算
 
 #### Scenario: 趋势图
 - **WHEN** 用户查看趋势图
-- **THEN** 柱状图展示专注时长趋势
+- **THEN** 柱状图展示专注时长趋势（支持 duration/count 切换）
 - **AND** 周粒度 X 轴为周一~周日
 - **AND** 日粒度 X 轴为 24 小时
 - **AND** 月粒度 X 轴为 4-5 周
@@ -232,6 +296,7 @@
 - **WHEN** 用户查看任务分布
 - **THEN** 左侧显示任务名称 + 色标 + 百分比，右侧显示饼图/环形图
 - **AND** 显示 Top 5 任务，其余归入"其他"
+- **AND** 仅在选定时间范围内的记录中计算
 
 #### Scenario: 空数据
 - **WHEN** 选定时间范围内无数据
@@ -240,17 +305,29 @@
 ---
 
 ### Requirement: 设置页
-系统 SHALL 提供设置页面，支持配置番茄钟参数和通知偏好。
+系统 SHALL 提供设置页面，支持配置番茄钟参数、仪表盘筛选偏好和通知偏好，以及退出登录。
 
 #### Scenario: 番茄设置
 - **WHEN** 用户打开设置
 - **THEN** 可修改：每日番茄目标数（默认 8）、工作时长（默认 25min）、短休时长（默认 5min）、长休时长（默认 15min）、长休触发间隔（默认 4）
 - **AND** 修改即时生效并保存到 Supabase
 
+#### Scenario: 仪表盘设置
+- **WHEN** 用户打开设置 → 仪表盘设置区域
+- **THEN** 显示所有可筛选的分类复选框（今天 + 自定义分类）
+- **AND** 勾选/取消立即生效，持久化到 localStorage `flowtime-dashboard-categories`
+- **AND** 今天分类下方展开子筛选：今天的待办、未来的待办、过去的待办
+- **AND** 子筛选仅在"今天"分类被勾选时显示
+
 #### Scenario: 通知设置
 - **WHEN** 用户打开设置
 - **THEN** 可开关：浏览器桌面通知、音效提醒
 - **AND** 修改即时生效
+
+#### Scenario: 退出登录
+- **WHEN** 用户点击设置页面底部"退出登录"按钮
+- **THEN** 调用 `signOut()` 清除认证状态
+- **AND** 跳转到 `/auth` 登录页
 
 ---
 
@@ -258,10 +335,11 @@
 系统 SHALL 以 Supabase 作为后端，所有数据按 `user_id` 隔离，支持 Realtime 跨设备同步。
 
 #### 数据库表
-- **todos**: id, user_id, title, description, status, priority, category, estimated_pomos, completed_pomos, created_at, completed_at
+- **todos**: id, user_id, title, description, status, priority, category, date, estimated_pomos, completed_pomos, created_at, completed_at
 - **pomodoro_records**: id, user_id, mode, task_id, duration, actual_duration, status, started_at, completed_at
 - **notes**: id, user_id, title, content, tags, created_at, updated_at
-- **user_settings**: id, user_id, daily_goal, work_duration, short_break_duration, long_break_duration, long_break_interval, sound_enabled, notification_enabled
+- **categories**: id, user_id, name, type, created_at
+- **user_settings**: id, user_id, daily_goal, work_duration, short_break_duration, long_break_duration, long_break_interval, sound_enabled, notification_enabled, greeting_text, countdown_todo_ids
 
 #### Scenario: 离线降级
 - **WHEN** 网络不可用

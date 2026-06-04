@@ -178,5 +178,5 @@ afterEach  → DELETE WHERE user_id = testUserId
 - [ ] useStatsStore 的时间范围筛选（filterByGranularity）有完整测试覆盖
 - [ ] stats-filter.test.ts：统计页粒度 + 日历选择器的核心逻辑测试通过
 - [ ] usePomodoroStore 的番茄完成/跳过/任务关联有对应测试
-- [ ] useTodoStore 的 changeEstimatedPomos、renameCategory、deleteCategory 有测试
+- [ ] useTodoStore 的 changeEstimatedPomos(id, value)、renameCategory、deleteCategory 有测试
 - [ ] 测试使用真实 Supabase 测试项目，afterEach 清理数据

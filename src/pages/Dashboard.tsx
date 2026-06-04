@@ -20,6 +20,7 @@ import {
 import { useTodoStore, usePomodoroStore, useNotesStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
+import ConfirmDialog from '../components/ConfirmDialog'
 import type { Todo } from '../types'
 
 const COUNTDOWN_CACHE_KEY = 'flowtime-countdown-ids'
@@ -231,6 +232,15 @@ export default function Dashboard() {
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear())
   const [pickerMonth, setPickerMonth] = useState(new Date().getMonth())
   const [showMonthPicker, setShowMonthPicker] = useState(false)
+  // Countdown removal confirmation
+  const [removeConfirm, setRemoveConfirm] = useState<{ id: string; title: string } | null>(null)
+
+  // Refresh todos when countdown picker opens to ensure sync
+  useEffect(() => {
+    if (showCountdownPicker) {
+      useTodoStore.getState().loadTodos()
+    }
+  }, [showCountdownPicker])
 
   // Load countdown from Supabase on mount
   useEffect(() => {
@@ -305,6 +315,17 @@ export default function Dashboard() {
     setCountdownTodoIds((prev) => prev.filter((x) => x !== id))
   }
 
+  const handleRemoveClick = (id: string, title: string) => {
+    setRemoveConfirm({ id, title })
+  }
+
+  const handleRemoveConfirm = () => {
+    if (removeConfirm) {
+      removeCountdown(removeConfirm.id)
+      setRemoveConfirm(null)
+    }
+  }
+
   // Drag-and-drop reorder
   const dragIdxRef = useRef<number | null>(null)
   const moveCountdown = useCallback((from: number, to: number) => {
@@ -355,6 +376,7 @@ export default function Dashboard() {
   // Normal state — Bento grid: 2 cols x 3 rows
   // -----------------------------------------------------------------------
   return (
+    <>
     <div className="p-6 h-full">
       {/* Greeting row — editable */}
       <div className="mb-5 flex items-center gap-3 group/greet">
@@ -468,19 +490,10 @@ export default function Dashboard() {
             {countdownTodos.map((todo, idx) => {
               const days = getCountdownDays(todo)
               const color = getCountdownColor(todo)
+              const isDone = todo.status === 'done'
               return (
                 <div
                   key={todo.id}
-                  draggable
-                  onDragStart={(e) => {
-                    dragIdxRef.current = idx
-                    e.dataTransfer.effectAllowed = 'move'
-                    ;(e.currentTarget as HTMLElement).style.opacity = '0.5'
-                  }}
-                  onDragEnd={(e) => {
-                    dragIdxRef.current = null
-                    ;(e.currentTarget as HTMLElement).style.opacity = '1'
-                  }}
                   onDragOver={(e) => {
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'move'
@@ -493,10 +506,28 @@ export default function Dashboard() {
                     }
                     dragIdxRef.current = null
                   }}
-                  className="relative flex-shrink-0 h-full aspect-square rounded-xl border border-light-border dark:border-dark-border bg-light-bg dark:bg-dark-bg flex flex-col items-center justify-center gap-0.5 p-2 group cursor-grab active:cursor-grabbing select-none"
+                  onClick={() => {
+                    if (todo.date) {
+                      useTodoStore.getState().setSelectedDate(todo.date)
+                    }
+                    navigate('/todo')
+                  }}
+                  className="relative flex-shrink-0 h-full aspect-square rounded-xl border border-light-border dark:border-dark-border bg-light-bg dark:bg-dark-bg flex flex-col items-center justify-center gap-0.5 p-2 group select-none cursor-pointer hover:shadow-md transition-shadow"
                 >
-                  {/* Drag handle indicator */}
-                  <div className="absolute top-1 left-1 opacity-0 group-hover:opacity-40 transition-opacity">
+                  {/* Drag handle — only this area is draggable */}
+                  <div
+                    draggable
+                    onDragStart={(e) => {
+                      dragIdxRef.current = idx
+                      e.dataTransfer.effectAllowed = 'move'
+                      ;(e.currentTarget as HTMLElement).closest('.aspect-square')?.setAttribute('style', 'opacity:0.5')
+                    }}
+                    onDragEnd={(e) => {
+                      dragIdxRef.current = null
+                      ;(e.currentTarget as HTMLElement).closest('.aspect-square')?.removeAttribute('style')
+                    }}
+                    className="absolute top-1 left-1 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab active:cursor-grabbing"
+                  >
                     <svg className="w-3 h-3 text-light-text-secondary dark:text-dark-text-secondary" viewBox="0 0 24 24" fill="currentColor">
                       <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
                       <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
@@ -504,9 +535,18 @@ export default function Dashboard() {
                     </svg>
                   </div>
 
+                  {/* Done checkmark — bottom-right */}
+                  {isDone && (
+                    <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                      <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </div>
+                  )}
+
                   {/* Remove button */}
                   <button
-                    onClick={() => removeCountdown(todo.id)}
+                    onClick={(e) => { e.stopPropagation(); handleRemoveClick(todo.id, todo.title); }}
                     className="absolute top-1 right-1 p-0.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
                     title="移除倒计时"
                   >
@@ -523,7 +563,7 @@ export default function Dashboard() {
                     还有
                   </span>
                   <span className={`text-2xl font-bold tabular-nums leading-none ${color.base} ${color.opacity}`}>
-                    {days !== null ? Math.abs(days) : '--'}
+                    {days !== null ? (days < 0 ? days : Math.abs(days)) : '--'}
                   </span>
                   <span className="text-[10px] text-light-text-secondary/70 dark:text-dark-text-secondary/70">
                     天
@@ -796,5 +836,17 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+
+    {/* Countdown removal confirmation */}
+    <ConfirmDialog
+      isOpen={removeConfirm !== null}
+      title="移除倒计时"
+      message={`确定要从倒计时中移除「${removeConfirm?.title ?? ''}」吗？\n\n注意：只会移除倒计时，不会删除该待办事项。`}
+      confirmLabel="确认移除"
+      danger={false}
+      onConfirm={handleRemoveConfirm}
+      onCancel={() => setRemoveConfirm(null)}
+    />
+  </>
   )
 }

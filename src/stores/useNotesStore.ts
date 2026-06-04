@@ -54,7 +54,12 @@ export const createNotesStore = (supabase: SupabaseClient) => {
             ...n,
             tags: n.tags ?? [],
           }))
-          set({ notes: mapped, currentNoteId: mapped.length > 0 ? mapped[0].id : null })
+          set((state) => ({
+            notes: mapped,
+            currentNoteId: mapped.some((n) => n.id === state.currentNoteId)
+              ? state.currentNoteId
+              : (mapped.length > 0 ? mapped[0].id : null),
+          }))
           await cacheTable('notes', mapped)
           return
         }
@@ -63,7 +68,12 @@ export const createNotesStore = (supabase: SupabaseClient) => {
       // Fallback: load from IndexedDB cache
       const cached = await loadCachedTable<Note>('notes')
       if (cached.length > 0) {
-        set({ notes: cached as Note[], currentNoteId: cached[0]?.id ?? null })
+        set((state) => ({
+          notes: cached as Note[],
+          currentNoteId: (cached as Note[]).some((n) => n.id === state.currentNoteId)
+            ? state.currentNoteId
+            : (cached[0]?.id ?? null),
+        }))
       }
     },
 

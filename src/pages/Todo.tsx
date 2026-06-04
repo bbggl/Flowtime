@@ -9,8 +9,11 @@ import {
   Trash2,
   Check,
   X,
+  Clock,
 } from 'lucide-react'
 import { useTodoStore, usePomodoroStore } from '../stores'
+import { supabase } from '../lib/supabase'
+import ConfirmDialog from '../components/ConfirmDialog'
 import type { Todo } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -289,6 +292,10 @@ export default function Todo() {
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set())
   const [editingCatName, setEditingCatName] = useState<string | null>(null)
   const [renameCatInput, setRenameCatInput] = useState('')
+  // Delete confirmation
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string; hasCountdown: boolean } | null>(null)
+  // Pomodoro count picker
+  const [pomoPickerId, setPomoPickerId] = useState<string | null>(null)
 
   // --- Date helpers ---
   function isPastDate(dateStr: string): boolean {
@@ -313,6 +320,16 @@ export default function Todo() {
     }
     prevTodosLenRef.current = todos.length
   }, [todos.length])
+
+  // Close pomo picker on outside click
+  useEffect(() => {
+    if (!pomoPickerId) return
+    const handler = () => {
+      setPomoPickerId(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [pomoPickerId])
 
   // --- Derived ---
   const isReadonly = isReadOnlyView(currentCategory)
@@ -414,19 +431,37 @@ export default function Todo() {
     [handleConfirmRenameCategory, handleCancelRenameCategory],
   )
 
-  const handleDelete = useCallback(
-    (id: string) => {
-      setDeletingIds((prev) => new Set([...prev, id]))
-      setTimeout(() => {
-        deleteTodo(id)
-        setDeletingIds((prev) => {
-          const next = new Set(prev)
-          next.delete(id)
-          return next
+  // Countdown helpers
+  const COUNTDOWN_CACHE_KEY = 'flowtime-countdown-ids'
+  const isRealSupabase = typeof (supabase as any)?.from === 'function'
+
+  function getCountdownIds(): string[] {
+    try {
+      const raw = localStorage.getItem(COUNTDOWN_CACHE_KEY)
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+  }
+
+  function removeFromCountdown(id: string) {
+    const ids = getCountdownIds().filter((x) => x !== id)
+    try { localStorage.setItem(COUNTDOWN_CACHE_KEY, JSON.stringify(ids)) } catch { /* ignore */ }
+    if (isRealSupabase) {
+      supabase
+        .from('user_settings')
+        .update({ countdown_todo_ids: ids })
+        .neq('user_id', '00000000-0000-0000-0000-000000000000')
+        .then(({ error }: { error: any }) => {
+          if (error) console.warn('Countdown remove failed:', error.message)
         })
-      }, 280)
+    }
+  }
+
+  const handleDelete = useCallback(
+    (id: string, title: string) => {
+      const hasCountdown = getCountdownIds().includes(id)
+      setDeleteConfirm({ id, title, hasCountdown })
     },
-    [deleteTodo],
+    [],
   )
 
   const handleStartPomodoro = useCallback(
@@ -455,6 +490,7 @@ export default function Todo() {
 
   // --- Render ---
   return (
+    <>
     <div className="flex flex-col h-full p-6">
       {/* Inline animation keyframes */}
       <style>{`
@@ -665,14 +701,39 @@ export default function Todo() {
                       </button>
                     )}
 
-                    {/* Pomodoro count (click to cycle, always visible) */}
-                    <button
-                      onClick={() => changeEstimatedPomos(todo.id)}
-                      className="flex-shrink-0 text-xs font-mono text-primary dark:text-primary-dark tabular-nums hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                      title="点击更改番茄钟数量"
-                    >
-                      🍅 {todo.completed_pomos}/{todo.estimated_pomos}
-                    </button>
+                    {/* Pomodoro count — click to open number picker */}
+                    <div className="relative flex-shrink-0">
+                      <button
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={() => setPomoPickerId(pomoPickerId === todo.id ? null : todo.id)}
+                        className="text-xs font-mono text-primary dark:text-primary-dark tabular-nums hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                        title="点击更改番茄钟数量"
+                      >
+                        🍅 {todo.completed_pomos}/{todo.estimated_pomos}
+                      </button>
+                      {pomoPickerId === todo.id && (
+                        <div
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="absolute top-full left-0 mt-1 z-40 w-14 max-h-40 overflow-y-auto scrollbar-hide rounded-lg bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border shadow-lg">
+                          {Array.from({ length: 100 }, (_, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                changeEstimatedPomos(todo.id, i)
+                                setPomoPickerId(null)
+                              }}
+                              className={`w-full px-2 py-1 text-xs font-mono text-center hover:bg-light-bg dark:hover:bg-dark-bg transition-colors ${
+                                i === todo.estimated_pomos
+                                  ? 'text-primary dark:text-primary-dark font-bold bg-primary/10 dark:bg-primary-dark/10'
+                                  : 'text-light-text dark:text-dark-text'
+                              }`}
+                            >
+                              {i}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
                     {/* Start pomodoro button (hidden for past dates) */}
                     {!isPastSelected && (
@@ -686,10 +747,21 @@ export default function Todo() {
                       </button>
                     )}
 
+                    {/* Jump to countdown button (only for countdown-bound todos) */}
+                    {getCountdownIds().includes(todo.id) && (
+                      <button
+                        onClick={() => navigate('/')}
+                        className="flex-shrink-0 p-1 rounded-lg text-primary dark:text-primary-dark hover:bg-primary/10 dark:hover:bg-primary-dark/10 transition-all"
+                        title="查看倒计时"
+                      >
+                        <Clock className="w-4 h-4" />
+                      </button>
+                    )}
+
                     {/* Delete button (visible on hover, hidden for past dates) */}
                     {!isPastSelected && (
                       <button
-                        onClick={() => handleDelete(todo.id)}
+                        onClick={() => handleDelete(todo.id, todo.title)}
                         className="flex-shrink-0 p-1 rounded-lg text-light-text-secondary/40 dark:text-dark-text-secondary/40 hover:text-red-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-all"
                         title="删除任务"
                       >
@@ -759,5 +831,36 @@ export default function Todo() {
         </div>
       )}
     </div>
+
+    {/* Delete confirmation */}
+    <ConfirmDialog
+      isOpen={deleteConfirm !== null}
+      title="删除待办"
+      message={
+        deleteConfirm?.hasCountdown
+          ? `确定要删除待办「${deleteConfirm?.title ?? ''}」吗？\n\n⚠️ 该待办已绑定倒计时，删除后将同时移除倒计时。\n\n此操作不可恢复。`
+          : `确定要删除待办「${deleteConfirm?.title ?? ''}」吗？\n\n此操作不可恢复。`
+      }
+      confirmLabel={deleteConfirm?.hasCountdown ? '确认删除（含倒计时）' : '确认删除'}
+      onConfirm={() => {
+        if (deleteConfirm) {
+          if (deleteConfirm.hasCountdown) {
+            removeFromCountdown(deleteConfirm.id)
+          }
+          setDeletingIds((prev) => new Set([...prev, deleteConfirm.id]))
+          setTimeout(() => {
+            deleteTodo(deleteConfirm.id)
+            setDeletingIds((prev) => {
+              const next = new Set(prev)
+              next.delete(deleteConfirm.id)
+              return next
+            })
+          }, 280)
+          setDeleteConfirm(null)
+        }
+      }}
+      onCancel={() => setDeleteConfirm(null)}
+    />
+  </>
   )
 }

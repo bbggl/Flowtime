@@ -50,7 +50,7 @@ interface TodoState {
   addTodo: (title: string, category: string) => void
   toggleTodo: (id: string) => void
   changePriority: (id: string) => void
-  changeEstimatedPomos: (id: string) => void
+  changeEstimatedPomos: (id: string, value: number) => void
   deleteTodo: (id: string) => void
   createCategory: (name: string) => void
   renameCategory: (oldName: string, newName: string) => void
@@ -153,7 +153,7 @@ export const createTodoStore = (supabase: SupabaseClient) => {
         priority: 'medium',
         category,
         date: category === 'today' ? (get().selectedDate || todayStr()) : undefined,
-        estimated_pomos: 1,
+        estimated_pomos: 0,
         completed_pomos: 0,
         created_at: new Date().toISOString(),
         completed_at: undefined,
@@ -239,21 +239,15 @@ export const createTodoStore = (supabase: SupabaseClient) => {
       }
     },
 
-    changeEstimatedPomos(id) {
-      const todo = get().todos.find((t) => t.id === id)
-      if (!todo) return
-
-      // Cycle: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 0 → 1 → ...
-      const next = todo.estimated_pomos >= 8 ? 0 : todo.estimated_pomos + 1
-
+    changeEstimatedPomos(id, value) {
       set({
-        todos: get().todos.map((t) => (t.id !== id ? t : { ...t, estimated_pomos: next })),
+        todos: get().todos.map((t) => (t.id !== id ? t : { ...t, estimated_pomos: value })),
       })
 
       if (isRealSupabase) {
         supabase
           .from('todos')
-          .update({ estimated_pomos: next })
+          .update({ estimated_pomos: value })
           .eq('id', id)
           .then(({ error }) => {
             if (error) console.warn('Todo estimated_pomos update failed:', error.message)

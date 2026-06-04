@@ -5,6 +5,7 @@ import { useThemeStore } from '../stores/useThemeStore'
 import MDEditor from '@uiw/react-md-editor'
 import '@uiw/react-md-editor/markdown-editor.css'
 import { Search, Plus, X } from 'lucide-react'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 function fuzzyMatch(text: string, query: string): boolean {
   if (!query.trim()) return true
@@ -54,6 +55,8 @@ export default function Notes() {
   const [content, setContent] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
+  // Delete confirmation
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string } | null>(null)
 
   // Sync local state when the selected note changes
   const prevNoteIdRef = useRef<string | null>(null)
@@ -119,8 +122,8 @@ export default function Notes() {
     useNotesStore.getState().setCurrentNote(id)
   }, [])
 
-  const handleDeleteNote = useCallback((id: string) => {
-    useNotesStore.getState().deleteNote(id)
+  const handleDeleteNote = useCallback((id: string, title: string) => {
+    setDeleteConfirm({ id, title })
   }, [])
 
   const handleAddTag = useCallback(() => {
@@ -148,6 +151,7 @@ export default function Notes() {
   // ── Render ──
 
   return (
+    <>
     <div className="flex h-full">
       {/* ── Left sidebar (300px) ── */}
       <aside className="w-[300px] flex-shrink-0 flex flex-col h-full border-r border-light-border dark:border-dark-border bg-light-card dark:bg-dark-card">
@@ -195,7 +199,7 @@ export default function Notes() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      handleDeleteNote(note.id)
+                      handleDeleteNote(note.id, note.title || '无标题')
                     }}
                     className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1 rounded hover:bg-light-border dark:hover:bg-dark-border text-light-text-secondary dark:text-dark-text-secondary hover:text-red-500 dark:hover:text-red-400 transition-all"
                   >
@@ -292,5 +296,20 @@ export default function Notes() {
         )}
       </div>
     </div>
+
+    {/* Delete confirmation */}
+    <ConfirmDialog
+      isOpen={deleteConfirm !== null}
+      title="删除笔记"
+      message={`确定要删除笔记「${deleteConfirm?.title ?? ''}」吗？\n\n删除后不可恢复。`}
+      onConfirm={() => {
+        if (deleteConfirm) {
+          useNotesStore.getState().deleteNote(deleteConfirm.id)
+          setDeleteConfirm(null)
+        }
+      }}
+      onCancel={() => setDeleteConfirm(null)}
+    />
+  </>
   )
 }

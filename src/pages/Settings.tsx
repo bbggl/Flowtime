@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import { useNavigate } from 'react-router-dom'
 import { usePomodoroStore, useTodoStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
-import { Timer, Bell, Volume2, LogOut, CheckSquare } from 'lucide-react'
+import { Timer, Bell, Volume2, LogOut, CheckSquare, ExternalLink, Info } from 'lucide-react'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -352,6 +352,23 @@ export default function Settings() {
         >
           退出登录
         </button>
+      </section>
+
+      {/* ── Section 5: 关于 ── */}
+      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mt-6">
+        <h2 className={sectionHeader}>
+          <Info className="w-5 h-5 text-primary dark:text-primary-dark" />
+          关于
+        </h2>
+        <a
+          href={`${window.location.origin}/easy-vibe`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-light-border dark:border-dark-border text-sm font-medium text-light-text dark:text-dark-text hover:bg-light-bg dark:hover:bg-dark-bg transition-colors"
+        >
+          <ExternalLink className="w-4 h-4" />
+          Easy Vibe
+        </a>
       </section>
     </div>
   )

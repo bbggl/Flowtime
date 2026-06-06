@@ -496,6 +496,7 @@ export default function Todo() {
 
   const handleBackToToday = useCallback(() => {
     setSelectedDate(null)
+    setShowCalendar(false)
   }, [setSelectedDate])
 
   // --- Render ---
@@ -932,14 +933,12 @@ export default function Todo() {
       {isTodayView && (
         <div className="flex-shrink-0 mt-4 flex flex-col items-start gap-3">
           {/* Show selected date info + back button when viewing history */}
-          {selectedDate && (
+          {selectedDate && selectedDate !== todayStr() && (
             <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-primary/10 dark:bg-primary-dark/10 border border-primary/20 dark:border-primary-dark/20">
               <span className="text-sm text-primary dark:text-primary-dark font-medium">
                 {isPastSelected
                   ? `查看 ${selectedDate} 的历史待办（仅可标记完成）`
-                  : selectedDate === todayStr()
-                    ? `查看 ${selectedDate} 的待办`
-                    : `查看 ${selectedDate} 的待办`}
+                  : `查看 ${selectedDate} 的待办`}
               </span>
               <button
                 onClick={handleBackToToday}

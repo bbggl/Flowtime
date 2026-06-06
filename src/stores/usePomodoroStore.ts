@@ -275,12 +275,40 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
 
     reset() {
       const state = get()
-      set({
-        status: 'idle',
-        remainingSeconds: durationForMode(state.mode, state),
-        startTime: null,
-        elapsedBeforePause: 0,
-      })
+      const totalDuration = durationForMode(state.mode, state)
+      const actualDuration = state.status === 'running' && state.startTime
+        ? state.elapsedBeforePause + Math.floor((Date.now() - state.startTime) / 1000)
+        : totalDuration - state.remainingSeconds
+
+      // 记录放弃的番茄钟（工作模式才计入统计）
+      if (state.mode === 'work' && actualDuration > 0) {
+        const record: PomodoroRecord = {
+          id: nextRecordId(),
+          user_id: '',
+          mode: state.mode,
+          task_id: state.linkedTaskId ?? undefined,
+          duration: totalDuration,
+          actual_duration: actualDuration,
+          status: 'interrupted',
+          started_at: new Date(Date.now() - actualDuration * 1000).toISOString(),
+          completed_at: new Date().toISOString(),
+        }
+        set({
+          status: 'idle',
+          remainingSeconds: totalDuration,
+          startTime: null,
+          elapsedBeforePause: 0,
+          records: [...state.records, record],
+        })
+        persistRecord(supabase, record, isRealSupabase)
+      } else {
+        set({
+          status: 'idle',
+          remainingSeconds: totalDuration,
+          startTime: null,
+          elapsedBeforePause: 0,
+        })
+      }
     },
 
     // ---- 跳过 = 提前完成：记录为 completed，计入统计 ----
@@ -510,8 +538,9 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
 
     getTodayFocusTime() {
       const state = get()
+      const today = new Date().toISOString().slice(0, 10)
       return state.records
-        .filter((r) => r.mode === 'work' && r.status === 'completed')
+        .filter((r) => r.mode === 'work' && r.status === 'completed' && r.started_at.startsWith(today))
         .reduce((sum, r) => sum + r.actual_duration, 0)
     },
 

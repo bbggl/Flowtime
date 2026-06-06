@@ -127,8 +127,9 @@ export default function Pomodoro() {
   )
 
   const todayFocusTime = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
     return records
-      .filter((r) => r.mode === 'work' && r.status === 'completed')
+      .filter((r) => r.mode === 'work' && r.status === 'completed' && r.started_at.startsWith(today))
       .reduce((sum, r) => sum + r.actual_duration, 0)
   }, [records])
 

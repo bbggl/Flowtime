@@ -199,6 +199,17 @@ export default function Stats() {
     })
   }, [])
 
+  // 响应式同步番茄记录变化
+  useEffect(() => {
+    const unsub = usePomodoroStore.subscribe(
+      (s) => s.records,
+      (records) => {
+        useStatsStore.getState().setRecords(records)
+      },
+    )
+    return unsub
+  }, [])
+
   // Build todo id → name lookup map
   const allTodos = useStore(useTodoStore, (s) => s.todos)
   const todoNames = useMemo(() => {
@@ -254,9 +265,29 @@ export default function Stats() {
     const completionRate =
       workRecords.length > 0 ? completed.length / workRecords.length : 0
 
-    // Daily avg within the selected time range
-    const days = new Set(workRecords.map((r) => r.started_at.split('T')[0]))
-    const dailyAvg = days.size > 0 ? completed.length / days.size : 0
+    // Daily avg: use total days in the period (not just days with records)
+    const dailyAvg = (() => {
+      if (completed.length === 0) return 0
+      const ref = selectedDate
+        ? (([y, m, d]) => new Date(y, m - 1, d))(selectedDate.split('-').map(Number))
+        : new Date()
+      let totalDays = 1
+      switch (granularity) {
+        case Granularity.Day:
+          totalDays = 1
+          break
+        case Granularity.Week:
+          totalDays = 7
+          break
+        case Granularity.Month:
+          totalDays = new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate()
+          break
+        case Granularity.Year:
+          totalDays = (ref.getFullYear() % 4 === 0 && ref.getFullYear() % 100 !== 0) || ref.getFullYear() % 400 === 0 ? 366 : 365
+          break
+      }
+      return completed.length / totalDays
+    })()
 
     return {
       totalFocusMinutes: Math.round(totalFocusSecs / 60),

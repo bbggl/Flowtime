@@ -906,7 +906,7 @@ export default function Todo() {
                     {/* Priority tag (click to cycle, hidden for past dates) */}
                     {!isPastSelected && (
                       <button
-                        onClick={() => changePriority(todo.id)}
+                        onClick={(e) => { e.stopPropagation(); changePriority(todo.id) }}
                         className={`flex-shrink-0 px-2 py-0.5 rounded-md text-xs font-medium transition-all hover:scale-105 active:scale-95 ${meta.bg}`}
                         title="点击切换优先级"
                       >
@@ -918,7 +918,7 @@ export default function Todo() {
                     <div className="relative flex-shrink-0">
                       <button
                         onMouseDown={(e) => e.stopPropagation()}
-                        onClick={() => setPomoPickerId(pomoPickerId === todo.id ? null : todo.id)}
+                        onClick={(e) => { e.stopPropagation(); setPomoPickerId(pomoPickerId === todo.id ? null : todo.id) }}
                         className="text-xs font-mono text-primary dark:text-primary-dark tabular-nums hover:scale-105 active:scale-95 transition-all cursor-pointer"
                         title="点击更改番茄钟数量"
                       >
@@ -951,7 +951,7 @@ export default function Todo() {
                     {/* Start pomodoro button (hidden for past dates) */}
                     {!isPastSelected && (
                       <button
-                        onClick={() => handleStartPomodoro(todo)}
+                        onClick={(e) => { e.stopPropagation(); handleStartPomodoro(todo) }}
                         className="flex-shrink-0 flex items-center gap-0.5 px-2 py-1 rounded-lg text-xs font-medium text-primary dark:text-primary-dark hover:bg-primary/10 dark:hover:bg-primary-dark/10 transition-colors"
                         title="开始番茄钟"
                       >

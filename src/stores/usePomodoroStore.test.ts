@@ -29,7 +29,7 @@ function makeRecord(overrides: Partial<PomodoroRecord> = {}): PomodoroRecord {
 }
 
 function makeStore() {
-  const store = createPomodoroStore({} as any)
+  const store = createPomodoroStore({} as any, () => null)
   // Set default durations for predictable testing
   store.getState().setDurations({
     work_duration: 25 * 60,

@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import { useNavigate } from 'react-router-dom'
 import { usePomodoroStore, useTodoStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
-import { Sun, Timer, Bell, Volume2, LogOut, CheckSquare, ExternalLink, Info } from 'lucide-react'
+import { Timer, Bell, Volume2, LogOut, CheckSquare, ExternalLink, Info } from 'lucide-react'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -53,6 +53,8 @@ export default function Settings() {
 
   // ── Dashboard todo overview settings ──
   const categories = useStore(useTodoStore, (s) => s.categories)
+  const urgencySortEnabled = useStore(useTodoStore, (s) => s.urgencySortEnabled)
+  const setUrgencySortEnabled = useTodoStore((s) => s.setUrgencySortEnabled)
 
   // Only real categories (today + custom), not readonly views (全部/计划中/已完成)
   const selectableCategories = useMemo(
@@ -107,6 +109,7 @@ export default function Settings() {
   const toggleNotification = () => setNotificationEnabled(!notificationEnabled)
   const toggleSound = () => setSoundEnabled(!soundEnabled)
   const toggleAutoStartBreak = () => setAutoStartBreak(!autoStartBreak)
+  const toggleUrgencySort = () => setUrgencySortEnabled(!urgencySortEnabled)
 
   // ── Logout ──
   const handleLogout = async () => {
@@ -135,57 +138,7 @@ export default function Settings() {
         设置
       </h1>
 
-      {/* ── Section 1: 常规设置 ── */}
-      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mb-6">
-        <h2 className={sectionHeader}>
-          <Sun className="w-5 h-5 text-primary dark:text-primary-dark" />
-          常规设置
-        </h2>
-
-        <div className="space-y-5">
-          {/* Day start hour */}
-          <div className={fieldWrapper}>
-            <label htmlFor="dayStartHour" className={labelClass}>
-              今日切换时间点（{dayStartHour}:00）
-            </label>
-            <input
-              id="dayStartHour"
-              type="range"
-              min={0}
-              max={7}
-              step={1}
-              value={dayStartHour}
-              onChange={(e) => setDayStartHour(Number(e.target.value))}
-              className="w-full accent-primary"
-            />
-            <div className="flex justify-between text-xs text-light-text-secondary dark:text-dark-text-secondary">
-              <span>0:00</span>
-              <span>7:00</span>
-            </div>
-          </div>
-
-          {/* Auto start break */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Timer className="w-5 h-5 text-light-text-secondary dark:text-dark-text-secondary" />
-              <span className="text-sm text-light-text dark:text-dark-text">
-                专注结束后自动开始休息
-              </span>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoStartBreak}
-              onClick={toggleAutoStartBreak}
-              className={toggleTrack(autoStartBreak)}
-            >
-              <span className={toggleKnob(autoStartBreak)} />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Section 2: 番茄设置 ── */}
+      {/* ── Section 1: 番茄设置 ── */}
       <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mb-6">
         <h2 className={sectionHeader}>
           <Timer className="w-5 h-5 text-primary dark:text-primary-dark" />
@@ -287,17 +240,26 @@ export default function Settings() {
               className={inputClass}
             />
           </div>
-        </div>
-      </section>
 
-      {/* ── Section 2: 通知设置 ── */}
-      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6">
-        <h2 className={sectionHeader}>
-          <Bell className="w-5 h-5 text-primary dark:text-primary-dark" />
-          通知设置
-        </h2>
+          {/* Auto start break */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Timer className="w-5 h-5 text-light-text-secondary dark:text-dark-text-secondary" />
+              <span className="text-sm text-light-text dark:text-dark-text">
+                专注结束后自动开始休息
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoStartBreak}
+              onClick={toggleAutoStartBreak}
+              className={toggleTrack(autoStartBreak)}
+            >
+              <span className={toggleKnob(autoStartBreak)} />
+            </button>
+          </div>
 
-        <div className="space-y-5">
           {/* Browser notification */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -338,7 +300,7 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* ── Section 3: 仪表盘设置 ── */}
+      {/* ── Section 2: 仪表盘设置 ── */}
       <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mt-6">
         <h2 className={sectionHeader}>
           <CheckSquare className="w-5 h-5 text-primary dark:text-primary-dark" />
@@ -392,6 +354,58 @@ export default function Settings() {
               </div>
             )
           })}
+        </div>
+      </section>
+
+      {/* ── Section 3: 待办设置 ── */}
+      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mt-6">
+        <h2 className={sectionHeader}>
+          <CheckSquare className="w-5 h-5 text-primary dark:text-primary-dark" />
+          待办设置
+        </h2>
+        <div className="space-y-5">
+          {/* Day start hour */}
+          <div className={fieldWrapper}>
+            <label htmlFor="dayStartHour" className={labelClass}>
+              今日切换时间点（{dayStartHour}:00）
+            </label>
+            <input
+              id="dayStartHour"
+              type="range"
+              min={0}
+              max={7}
+              step={1}
+              value={dayStartHour}
+              onChange={(e) => setDayStartHour(Number(e.target.value))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-xs text-light-text-secondary dark:text-dark-text-secondary">
+              <span>0:00</span>
+              <span>7:00</span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-light-text dark:text-dark-text">
+                紧急程度排序
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={urgencySortEnabled}
+              onClick={toggleUrgencySort}
+              className={toggleTrack(urgencySortEnabled)}
+            >
+              <span className={toggleKnob(urgencySortEnabled)} />
+            </button>
+          </div>
+          {urgencySortEnabled && (
+            <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary">
+              开启后，待办按紧急程度（高→中→低）排列，拖动排序仅限同优先级内
+            </p>
+          )}
         </div>
       </section>
 

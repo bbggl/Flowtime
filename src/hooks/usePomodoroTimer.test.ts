@@ -21,7 +21,7 @@ describe('usePomodoroTimer', () => {
     })
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow)
 
-    store = createPomodoroStore({} as any)
+    store = createPomodoroStore({} as any, () => null)
     store.getState().setDurations({
       work_duration: 25 * 60,
       short_break_duration: 5 * 60,

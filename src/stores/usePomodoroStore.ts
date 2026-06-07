@@ -122,7 +122,7 @@ function persistRecord(
     })
 }
 
-export const createPomodoroStore = (supabase: SupabaseClient) => {
+export const createPomodoroStore = (supabase: SupabaseClient, getTodoStore: () => any) => {
   const isRealSupabase = typeof (supabase as any)?.from === 'function'
 
   return create<PomodoroState>((set, get) => ({
@@ -379,16 +379,37 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
             if (error) console.warn('Skip record insert failed:', error.message)
           })
 
-        // 如果关联了任务，更新 completed_pomos
+        // 如果关联了任务，更新 completed_pomos（双向同步源与副本）
         if (state.mode === 'work' && state.linkedTaskId) {
           const newCompletedPomos = state.taskCompletedPomos + 1
-          supabase
-            .from('todos')
-            .update({ completed_pomos: newCompletedPomos })
-            .eq('id', state.linkedTaskId)
-            .then(({ error }) => {
-              if (error) console.warn('Task pomo update on skip failed:', error.message)
-            })
+          const todoStore = getTodoStore()
+          if (todoStore) {
+            const todos: any[] = todoStore.getState().todos
+            const linkedTodo = todos.find((t: any) => t.id === state.linkedTaskId)
+            if (linkedTodo) {
+              const idsToUpdate = new Set<string>([state.linkedTaskId])
+              if (linkedTodo.synced_from_id) idsToUpdate.add(linkedTodo.synced_from_id)
+              for (const t of todos) {
+                if (t.synced_from_id === state.linkedTaskId) idsToUpdate.add(t.id)
+              }
+              todoStore.setState({
+                todos: todos.map((t: any) =>
+                  idsToUpdate.has(t.id) ? { ...t, completed_pomos: newCompletedPomos } : t,
+                ),
+              })
+              if (isRealSupabase) {
+                for (const id of idsToUpdate) {
+                  supabase
+                    .from('todos')
+                    .update({ completed_pomos: newCompletedPomos })
+                    .eq('id', id)
+                    .then(({ error }: { error: any }) => {
+                      if (error) console.warn('Task pomo update on skip failed:', error.message)
+                    })
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -433,17 +454,39 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
         // 同步写入 Supabase
         persistRecord(supabase, record, isRealSupabase)
 
-        // 如果关联了任务，更新任务的 completed_pomos
+        // 如果关联了任务，更新任务的 completed_pomos（双向同步源与副本）
         if (state.mode === 'work' && state.linkedTaskId) {
           const newCompletedPomos = state.taskCompletedPomos + 1
-          if (isRealSupabase) {
-            supabase
-              .from('todos')
-              .update({ completed_pomos: newCompletedPomos })
-              .eq('id', state.linkedTaskId)
-              .then(({ error }) => {
-                if (error) console.warn('Task pomo update failed:', error.message)
+          const todoStore = getTodoStore()
+          if (todoStore) {
+            const todos: any[] = todoStore.getState().todos
+            const linkedTodo = todos.find((t: any) => t.id === state.linkedTaskId)
+            if (linkedTodo) {
+              const idsToUpdate = new Set<string>([state.linkedTaskId])
+              // 如果关联的是同步副本，同时更新源待办
+              if (linkedTodo.synced_from_id) idsToUpdate.add(linkedTodo.synced_from_id)
+              // 如果关联的是源待办，同时更新所有同步副本
+              for (const t of todos) {
+                if (t.synced_from_id === state.linkedTaskId) idsToUpdate.add(t.id)
+              }
+              todoStore.setState({
+                todos: todos.map((t: any) =>
+                  idsToUpdate.has(t.id) ? { ...t, completed_pomos: newCompletedPomos } : t,
+                ),
               })
+              // 持久化到 Supabase
+              if (isRealSupabase) {
+                for (const id of idsToUpdate) {
+                  supabase
+                    .from('todos')
+                    .update({ completed_pomos: newCompletedPomos })
+                    .eq('id', id)
+                    .then(({ error }: { error: any }) => {
+                      if (error) console.warn('Task pomo update failed:', error.message)
+                    })
+                }
+              }
+            }
           }
         }
       } else {
@@ -463,7 +506,9 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
     },
 
     linkTask(taskId, taskTitle) {
-      set({ linkedTaskId: taskId, linkedTaskTitle: taskTitle, taskCompletedPomos: 0 })
+      const todoStore = getTodoStore()
+      const todo = todoStore?.getState?.()?.todos?.find((t: any) => t.id === taskId)
+      set({ linkedTaskId: taskId, linkedTaskTitle: taskTitle, taskCompletedPomos: todo?.completed_pomos ?? 0 })
     },
 
     unlinkTask() {

@@ -110,6 +110,7 @@ export default function Pomodoro() {
   const storeLongBreakDuration = useStore(usePomodoroStore, (s) => s.longBreakDuration)
   const setDuration = usePomodoroStore((s) => s.setDuration)
   const allTodos = useStore(useTodoStore, (s) => s.todos)
+  const categories = useStore(useTodoStore, (s) => s.categories)
   const formattedTime = useMemo(() => formatTime(remainingSeconds), [remainingSeconds])
 
   // Mount 时从 Supabase 加载番茄记录
@@ -134,10 +135,35 @@ export default function Pomodoro() {
       .reduce((sum, r) => sum + r.actual_duration, 0)
   }, [records])
 
-  const pendingTodos = useMemo(
-    () => allTodos.filter((t) => t.status === 'pending'),
-    [allTodos],
-  )
+  // 去重：如果有 pending 同步副本，只显示副本（隐藏源待办），避免重复
+  const pendingTodos = useMemo(() => {
+    // 收集"有 pending 同步副本"的源待办 ID
+    const syncedSourceIds = new Set<string>()
+    for (const t of allTodos) {
+      if (t.synced_from_id && t.status === 'pending' && t.category === 'today') {
+        syncedSourceIds.add(t.synced_from_id)
+      }
+    }
+    return allTodos.filter((t) => {
+      if (t.status !== 'pending') return false
+      // 如果这个待办是源，且有 pending 同步副本，隐藏它（副本会代替显示）
+      if (syncedSourceIds.has(t.id)) return false
+      return true
+    })
+  }, [allTodos])
+
+  // 解析待办的分类标签
+  function getTodoCategoryLabel(todo: Todo): string {
+    if (todo.synced_from_id) {
+      // 同步副本：显示"今天，来源分类名"
+      const source = allTodos.find((t) => t.id === todo.synced_from_id)
+      const sourceCat = categories.find((c) => c.id === source?.category)
+      return `今天，${sourceCat?.name || source?.category || ''}`
+    }
+    // 普通待办：显示所属分类名
+    const cat = categories.find((c) => c.id === todo.category)
+    return cat?.name || todo.category
+  }
 
   const [taskDropdownOpen, setTaskDropdownOpen] = useState(false)
   const taskDropdownRef = useRef<HTMLDivElement>(null)
@@ -624,9 +650,14 @@ export default function Pomodoro() {
                     ${todo.id === linkedTaskId ? 'bg-light-bg dark:bg-dark-bg' : ''}
                   `}
                 >
-                  <span className="text-light-text dark:text-dark-text">
-                    {todo.title}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-light-text dark:text-dark-text truncate">
+                      {todo.title}
+                    </span>
+                    <span className="shrink-0 ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium bg-light-border/40 dark:bg-dark-border/40 text-light-text-secondary dark:text-dark-text-secondary">
+                      {getTodoCategoryLabel(todo)}
+                    </span>
+                  </div>
                   {todo.estimated_pomos > 0 && (
                     <span className="ml-2 text-xs text-light-text-secondary dark:text-dark-text-secondary">
                       🍅 {todo.completed_pomos}/{todo.estimated_pomos}

@@ -86,6 +86,10 @@ interface TodoState {
   breakExpiredSync: () => void
   setDayStartHour: (hour: number) => void
   dayStartHour: number
+
+  // Urgency sort
+  urgencySortEnabled: boolean
+  setUrgencySortEnabled: (enabled: boolean) => void
 }
 
 let idCounter = 0
@@ -113,6 +117,9 @@ export const createTodoStore = (supabase: SupabaseClient) => {
     isMultiSelectMode: false,
     selectedTodoIds: new Set<string>(),
     dayStartHour: 0,
+    urgencySortEnabled: (() => {
+      try { return localStorage.getItem('flowtime-urgency-sort') === 'true' } catch { return false }
+    })(),
 
     // ---- Load from Supabase (with offline fallback) ----
     async loadTodos() {
@@ -274,40 +281,67 @@ export const createTodoStore = (supabase: SupabaseClient) => {
     },
 
     changePriority(id) {
-      const todo = get().todos.find((t) => t.id === id)
+      const todos = get().todos
+      const todo = todos.find((t) => t.id === id)
       if (!todo) return
 
       const idx = PRIORITY_ORDER.indexOf(todo.priority)
       const next = PRIORITY_ORDER[(idx + 1) % PRIORITY_ORDER.length]
 
+      // 收集源与同步副本的关联 ID（双向）
+      const idsToUpdate = new Set<string>([id])
+      if (todo.synced_from_id) idsToUpdate.add(todo.synced_from_id)
+      for (const t of todos) {
+        if (t.synced_from_id === id) idsToUpdate.add(t.id)
+      }
+
       set({
-        todos: get().todos.map((t) => (t.id !== id ? t : { ...t, priority: next })),
+        todos: todos.map((t) =>
+          idsToUpdate.has(t.id) ? { ...t, priority: next } : t,
+        ),
       })
 
       if (isRealSupabase) {
-        supabase
-          .from('todos')
-          .update({ priority: next })
-          .eq('id', id)
-          .then(({ error }) => {
-            if (error) console.warn('Todo priority update failed:', error.message)
-          })
+        for (const tid of idsToUpdate) {
+          supabase
+            .from('todos')
+            .update({ priority: next })
+            .eq('id', tid)
+            .then(({ error }) => {
+              if (error) console.warn('Todo priority update failed:', error.message)
+            })
+        }
       }
     },
 
     changeEstimatedPomos(id, value) {
+      const todos = get().todos
+      const todo = todos.find((t) => t.id === id)
+      if (!todo) return
+
+      // 收集源与同步副本的关联 ID（双向）
+      const idsToUpdate = new Set<string>([id])
+      if (todo.synced_from_id) idsToUpdate.add(todo.synced_from_id)
+      for (const t of todos) {
+        if (t.synced_from_id === id) idsToUpdate.add(t.id)
+      }
+
       set({
-        todos: get().todos.map((t) => (t.id !== id ? t : { ...t, estimated_pomos: value })),
+        todos: todos.map((t) =>
+          idsToUpdate.has(t.id) ? { ...t, estimated_pomos: value } : t,
+        ),
       })
 
       if (isRealSupabase) {
-        supabase
-          .from('todos')
-          .update({ estimated_pomos: value })
-          .eq('id', id)
-          .then(({ error }) => {
-            if (error) console.warn('Todo estimated_pomos update failed:', error.message)
-          })
+        for (const tid of idsToUpdate) {
+          supabase
+            .from('todos')
+            .update({ estimated_pomos: value })
+            .eq('id', tid)
+            .then(({ error }) => {
+              if (error) console.warn('Todo estimated_pomos update failed:', error.message)
+            })
+        }
       }
     },
 
@@ -438,11 +472,32 @@ export const createTodoStore = (supabase: SupabaseClient) => {
 
     reorderTodos(fromIndex, toIndex) {
       const todos = [...get().todos]
+      const fromTodo = todos[fromIndex]
+      const toTodo = todos[toIndex]
+
+      // 紧急程度排序开启时，只允许在同优先级内拖动
+      if (get().urgencySortEnabled && fromTodo.priority !== toTodo.priority) {
+        return
+      }
+
       const [item] = todos.splice(fromIndex, 1)
       todos.splice(toIndex, 0, item)
 
-      // Reassign sequential sort_order
-      const updated = todos.map((t, i) => ({ ...t, sort_order: i }))
+      let updated: Todo[]
+      if (get().urgencySortEnabled) {
+        // 仅重排同优先级待办的 sort_order，不影响其他优先级
+        const priority = item.priority
+        let order = 0
+        updated = todos.map((t) => {
+          if (t.priority === priority) {
+            return { ...t, sort_order: order++ }
+          }
+          return t
+        })
+      } else {
+        // Reassign sequential sort_order
+        updated = todos.map((t, i) => ({ ...t, sort_order: i }))
+      }
       set({ todos: updated })
 
       // Sync to Supabase (fire-and-forget, batch updates)
@@ -517,6 +572,10 @@ export const createTodoStore = (supabase: SupabaseClient) => {
       for (const id of ids) {
         const src = todos.find((t) => t.id === id)
         if (!src) continue
+        // 如果今天已存在该待办的同步副本，跳过重复同步
+        if (todos.some((t) => t.synced_from_id === src.id && t.category === 'today')) {
+          continue
+        }
         const newTodo: Todo = {
           id: nextId(),
           user_id: src.user_id,
@@ -526,8 +585,8 @@ export const createTodoStore = (supabase: SupabaseClient) => {
           priority: src.priority,
           category: 'today',
           date,
-          estimated_pomos: 0,
-          completed_pomos: 0,
+          estimated_pomos: src.estimated_pomos,
+          completed_pomos: src.completed_pomos,
           sort_order: --minOrder,
           created_at: now,
           completed_at: src.completed_at,
@@ -722,22 +781,44 @@ export const createTodoStore = (supabase: SupabaseClient) => {
       set({ dayStartHour: hour })
     },
 
+    setUrgencySortEnabled(enabled) {
+      set({ urgencySortEnabled: enabled })
+      try { localStorage.setItem('flowtime-urgency-sort', String(enabled)) } catch { /* ignore */ }
+    },
+
     getFilteredTodos() {
-      const { todos, currentCategory, selectedDate } = get()
+      const { todos, currentCategory, selectedDate, urgencySortEnabled } = get()
+      let filtered: Todo[]
       switch (currentCategory) {
         case 'today': {
           const targetDate = selectedDate || todayStr()
-          return todos.filter((t) => t.category === 'today' && t.date === targetDate)
+          filtered = todos.filter((t) => t.category === 'today' && t.date === targetDate)
+          break
         }
         case 'all':
-          return todos.filter((t) => t.category !== 'today')
+          filtered = todos.filter((t) => t.category !== 'today')
+          break
         case 'planned':
-          return todos.filter((t) => t.category !== 'today' && t.status === 'pending')
+          filtered = todos.filter((t) => t.category !== 'today' && t.status === 'pending')
+          break
         case 'completed':
-          return todos.filter((t) => t.category !== 'today' && t.status === 'done')
+          filtered = todos.filter((t) => t.category !== 'today' && t.status === 'done')
+          break
         default:
-          return todos.filter((t) => t.category === currentCategory)
+          filtered = todos.filter((t) => t.category === currentCategory)
       }
+
+      // 紧急程度排序：高 → 中 → 低，同级内按 sort_order
+      if (urgencySortEnabled) {
+        const priorityOrder: Record<Todo['priority'], number> = { high: 0, medium: 1, low: 2 }
+        filtered = [...filtered].sort((a, b) => {
+          const p = priorityOrder[a.priority] - priorityOrder[b.priority]
+          if (p !== 0) return p
+          return a.sort_order - b.sort_order
+        })
+      }
+
+      return filtered
     },
 
     isReadOnlyView(categoryId) {

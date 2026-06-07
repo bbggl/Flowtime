@@ -163,6 +163,148 @@ describe('filterByGranularity', () => {
 })
 
 // ================================================================
+// filterByGranularity with endDate range parameter
+// ================================================================
+describe('filterByGranularity with endDate (range)', () => {
+  // ── Helpers ──
+
+  function rec(dateStr: string, id = dateStr): PomodoroRecord {
+    return makeRecord(`${dateStr}T10:00:00.000Z`, { id })
+  }
+
+  it('Day: filters date range correctly (inclusive)', () => {
+    const records = [
+      rec('2026-06-01', 'a'),
+      rec('2026-06-05', 'b'),
+      rec('2026-06-08', 'c'),
+      rec('2026-06-10', 'd'),
+      rec('2026-06-15', 'e'),
+    ]
+    // June 1 to June 8 inclusive
+    const result = filterByGranularity(records, Granularity.Day, '2026-06-01', '2026-06-08')
+    expect(result).toHaveLength(3) // June 1, 5, 8
+    expect(result.map((r) => r.id).sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('Day: single day when start equals end', () => {
+    const records = [
+      rec('2026-06-01', 'a'),
+      rec('2026-06-05', 'b'),
+      rec('2026-06-10', 'c'),
+    ]
+    const result = filterByGranularity(records, Granularity.Day, '2026-06-05', '2026-06-05')
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('b')
+  })
+
+  it('Day: falls back to single-point when endDate is null', () => {
+    const records = [
+      rec('2026-06-01', 'a'),
+      rec('2026-06-04', 'b'), // today
+      rec('2026-06-10', 'c'),
+    ]
+    // null endDate → same as old behavior, only June 4 (today)
+    const result = filterByGranularity(records, Granularity.Day, null, null)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('b')
+  })
+
+  it('Day: falls back to single-point when endDate is undefined', () => {
+    const records = [
+      rec('2026-06-01', 'a'),
+      rec('2026-06-04', 'b'),
+      rec('2026-06-10', 'c'),
+    ]
+    const result = filterByGranularity(records, Granularity.Day)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('b')
+  })
+
+  it('Month: filters month range correctly', () => {
+    const records = [
+      rec('2026-01-15', 'a'),
+      rec('2026-02-01', 'b'),
+      rec('2026-03-10', 'c'),
+      rec('2026-03-31', 'd'),
+      rec('2026-04-01', 'e'),
+      rec('2026-05-20', 'f'),
+    ]
+    // February to April inclusive
+    const result = filterByGranularity(records, Granularity.Month, '2026-02-01', '2026-04-30')
+    expect(result).toHaveLength(4) // Feb, Mar(2), Apr
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c', 'd', 'e'])
+  })
+
+  it('Month: single month when start equals end', () => {
+    const records = [
+      rec('2026-01-15', 'a'),
+      rec('2026-02-01', 'b'),
+      rec('2026-02-28', 'c'),
+      rec('2026-03-10', 'd'),
+    ]
+    const result = filterByGranularity(records, Granularity.Month, '2026-02-01', '2026-02-01')
+    expect(result).toHaveLength(2)
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c'])
+  })
+
+  it('Month: falls back to single-point when endDate is null', () => {
+    const records = [
+      rec('2026-05-15', 'a'),
+      rec('2026-06-01', 'b'),
+      rec('2026-06-15', 'c'),
+      rec('2026-07-01', 'd'),
+    ]
+    // null endDate → only June (current month for mock now)
+    const result = filterByGranularity(records, Granularity.Month, null, null)
+    expect(result).toHaveLength(2)
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c'])
+  })
+
+  it('Week: filters week range correctly', () => {
+    // referenceDate = June 1 (Monday), endDate = June 14 (Sunday)
+    // Week 1: June 1-7, Week 2: June 8-14
+    const records = [
+      rec('2026-05-31', 'a'), // Sunday before
+      rec('2026-06-01', 'b'), // Week 1 Monday
+      rec('2026-06-07', 'c'), // Week 1 Sunday
+      rec('2026-06-08', 'd'), // Week 2 Monday
+      rec('2026-06-14', 'e'), // Week 2 Sunday
+      rec('2026-06-15', 'f'), // Monday after
+    ]
+    const result = filterByGranularity(records, Granularity.Week, '2026-06-01', '2026-06-14')
+    expect(result).toHaveLength(4) // b, c, d, e
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c', 'd', 'e'])
+  })
+
+  it('Year: filters year range correctly', () => {
+    const records = [
+      rec('2024-12-31', 'a'),
+      rec('2025-01-01', 'b'),
+      rec('2025-12-31', 'c'),
+      rec('2026-01-01', 'd'),
+      rec('2026-06-15', 'e'),
+      rec('2027-01-01', 'f'),
+    ]
+    // 2025 to 2026 inclusive
+    const result = filterByGranularity(records, Granularity.Year, '2025-01-01', '2026-12-31')
+    expect(result).toHaveLength(4) // b, c, d, e
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c', 'd', 'e'])
+  })
+
+  it('Year: single year when start equals end', () => {
+    const records = [
+      rec('2024-12-31', 'a'),
+      rec('2025-01-01', 'b'),
+      rec('2025-06-15', 'c'),
+      rec('2026-01-01', 'd'),
+    ]
+    const result = filterByGranularity(records, Granularity.Year, '2025-01-01', '2025-01-01')
+    expect(result).toHaveLength(2) // b, c
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c'])
+  })
+})
+
+// ================================================================
 // filterByGranularity with optional referenceDate
 // ================================================================
 describe('filterByGranularity with referenceDate', () => {

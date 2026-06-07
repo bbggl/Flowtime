@@ -5,6 +5,7 @@ import {
   groupRecordsByGranularity,
   getTopTasks,
   filterByGranularity,
+  getDailyAvgFocus,
   Granularity,
 } from './stats'
 import type { PomodoroRecord } from '../types'
@@ -169,6 +170,56 @@ describe('filterByGranularity', () => {
 })
 
 // ================================================================
+// filterByGranularity with endDate range parameter
+// ================================================================
+describe('filterByGranularity with endDate', () => {
+  it('Day: filters date range correctly', () => {
+    const records = [
+      makeRecord({ id: 'a', started_at: '2026-06-01T10:00:00.000Z' }),
+      makeRecord({ id: 'b', started_at: '2026-06-05T10:00:00.000Z' }),
+      makeRecord({ id: 'c', started_at: '2026-06-08T10:00:00.000Z' }),
+      makeRecord({ id: 'd', started_at: '2026-06-10T10:00:00.000Z' }),
+    ]
+    // June 1 to June 8 inclusive → a, b, c
+    const result = filterByGranularity(records, Granularity.Day, '2026-06-01', '2026-06-08')
+    expect(result).toHaveLength(3)
+    expect(result.map((r) => r.id).sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('Day: single day when start equals end', () => {
+    const records = [
+      makeRecord({ id: 'a', started_at: '2026-06-05T10:00:00.000Z' }),
+      makeRecord({ id: 'b', started_at: '2026-06-01T10:00:00.000Z' }),
+    ]
+    const result = filterByGranularity(records, Granularity.Day, '2026-06-05', '2026-06-05')
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('a')
+  })
+
+  it('Month: filters month range correctly', () => {
+    const records = [
+      makeRecord({ id: 'a', started_at: '2026-01-15T10:00:00.000Z' }),
+      makeRecord({ id: 'b', started_at: '2026-02-01T10:00:00.000Z' }),
+      makeRecord({ id: 'c', started_at: '2026-03-10T10:00:00.000Z' }),
+      makeRecord({ id: 'd', started_at: '2026-04-01T10:00:00.000Z' }),
+      makeRecord({ id: 'e', started_at: '2026-05-20T10:00:00.000Z' }),
+    ]
+    // February to April inclusive → b, c, d
+    const result = filterByGranularity(records, Granularity.Month, '2026-02-01', '2026-04-30')
+    expect(result).toHaveLength(3)
+    expect(result.map((r) => r.id).sort()).toEqual(['b', 'c', 'd'])
+  })
+
+  it('backward compatible: works without endDate', () => {
+    const today = makeRecord({ id: 'a', started_at: '2026-06-04T10:00:00.000Z' })
+    const yesterday = makeRecord({ id: 'b', started_at: '2026-06-03T10:00:00.000Z' })
+    const result = filterByGranularity([today, yesterday], Granularity.Day)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('a')
+  })
+})
+
+// ================================================================
 describe('getTopTasks', () => {
   it('returns empty for empty records', () => {
     expect(getTopTasks([])).toEqual([])
@@ -202,5 +253,39 @@ describe('getTopTasks', () => {
     ]
     const top = getTopTasks(records, 5)
     expect(top[0].taskId).toBeNull()
+  })
+})
+
+// ================================================================
+describe('getDailyAvgFocus', () => {
+  it('returns 0 for empty records', () => {
+    expect(getDailyAvgFocus([], 7)).toBe(0)
+  })
+
+  it('calculates daily avg correctly', () => {
+    const records = [
+      makeRecord({ actual_duration: 3600, status: 'completed', mode: 'work' }),
+      makeRecord({ id: '2', actual_duration: 1800, status: 'completed', mode: 'work' }),
+    ]
+    // total = 5400 seconds, days = 7, avg ≈ 771 sec/day
+    expect(getDailyAvgFocus(records, 7)).toBeCloseTo(771, 0)
+  })
+
+  it('returns 0 when days is 0 or negative', () => {
+    const records = [
+      makeRecord({ actual_duration: 3600, status: 'completed', mode: 'work' }),
+    ]
+    expect(getDailyAvgFocus(records, 0)).toBe(0)
+    expect(getDailyAvgFocus(records, -1)).toBe(0)
+  })
+
+  it('sums only completed work records', () => {
+    const records = [
+      makeRecord({ actual_duration: 3600, status: 'completed', mode: 'work' }),
+      makeRecord({ id: '2', actual_duration: 600, status: 'interrupted', mode: 'work' }),
+      makeRecord({ id: '3', actual_duration: 1200, status: 'completed', mode: 'short_break' }),
+    ]
+    // only first record: 3600 / 7 ≈ 514
+    expect(getDailyAvgFocus(records, 7)).toBeCloseTo(514, 0)
   })
 })

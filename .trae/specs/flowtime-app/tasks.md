@@ -190,6 +190,57 @@
   - 创建 `.scrollbar-hide` CSS 工具类（隐藏滚动条保留滚轮功能）
   - 验证：组件复用正常，样式正确
 
+## 阶段十一：功能增强（TDD）
+
+- [x] Task 24: 侧边栏展开功能
+  - [x] Task 24.1: TDD — `useThemeStore` 扩展 `sidebarExpanded` 状态，写测试：默认收起、切换展开/收起、localStorage 持久化
+  - [x] Task 24.2: 实现 Sidebar 展开/收起按钮（ChevronLeft/ChevronRight 图标）+ 展开态布局（约180px 宽，图标+文字标题）
+  - 验证：`npm test` 测试通过，手动切换/刷新保持正常
+
+- [x] Task 25: 统计页日均专注时长
+  - [x] Task 25.1: TDD — 写工具函数 `getDailyAvgFocus(records, days)` 测试：空记录 → 0、有记录计算正确
+  - [x] Task 25.2: Stats 页面添加"日均专注时长"卡片（在"总专注时长"后），格式 X小时X分钟
+  - 验证：`npm test` 测试通过，UI 显示正确
+
+- [x] Task 26: 设置页增强
+  - [x] Task 26.1: TDD — `usePomodoroStore` 扩展 `day_start_hour` + `auto_start_break` 字段，写测试：默认值、setter、localStorage 持久化
+  - [x] Task 26.2: Settings 页面添加"今日切换时间点"滑块（0:00~7:00）和"专注结束后自动开始休息"开关
+  - [x] Task 26.3: 更新 `user_settings` Supabase 表结构（新增 `day_start_hour`、`auto_start_break` 字段）
+  - 验证：`npm test` 测试通过，设置修改即时生效，刷新保持
+
+- [x] Task 27: 待办多选与同步
+  - [x] Task 27.1: TDD — `Todo` 类型扩展 `synced_from_id` 字段，写 useTodoStore 测试：
+    - `syncToToday(ids)`：批量创建关联副本到"今天"
+    - `toggleSynced()`：切换完成状态时同步更新关联副本/源待办
+    - `breakSync()`：置空所有过期 `synced_from_id`
+    - `uncompleteTodos(ids)`：批量取消完成
+    - `moveTodos(ids, category)`：批量移动分类
+    - `copyTodos(ids, category)`：批量复制到分类
+  - [x] Task 27.2: TDD — 写 `isNewDay(hour)` 工具函数测试：按 day_start_hour 判断是否新的一天
+  - [x] Task 27.3: 实现多选模式 UI：右上角"多选"按钮、待办边缘高亮（ring-2 ring-primary）选中效果、底部操作栏
+  - [x] Task 27.4: 实现操作栏：同步到今天、取消完成、移动/复制到分类选择
+  - [x] Task 27.5: 实现次日自动断连逻辑（应用启动时 + 定时检查）
+  - [x] Task 27.6: 更新 Supabase `todos` 表结构（新增 `synced_from_id` 字段）
+  - 验证：`npm test` 测试通过，多选交互正常，同步/断连逻辑正确
+
+- [x] Task 28: 番茄钟按钮合并
+  - [x] Task 28.1: TDD — `usePomodoroStore` 扩展测试：
+    - 长休息确认后切换模式到 long_break
+    - 长休息结束后自动切回 short_break 时长
+    - `auto_start_break` 开启时专注结束后自动开始休息
+  - [x] Task 28.2: Pomodoro 页面：移除长休息按钮，合并为"专注 | 休息"两按钮，休息按钮默认显示短休息时长
+  - [x] Task 28.3: 实现长休息提醒确认对话框 → 确认后自动切换到长休息 → 结束后切回短休息时长
+  - [x] Task 28.4: 实现 `auto_start_break` 逻辑：专注计时完成 → 自动进入休息模式
+  - 验证：`npm test` 测试通过，按钮切换正确，长休息流程正常
+
+- [x] Task 29: 点击计时数字修改预设时长
+  - [x] Task 29.1: TDD — `usePomodoroStore` 扩展 `setDuration(mode, minutes)` 测试：
+    - 设置各模式时长
+    - 同步更新 Supabase `user_settings`
+    - 运行时修改不影响 `remainingSeconds`
+  - [x] Task 29.2: Pomodoro 页面：计时数字可点击，弹出分钟选择器（风格与番茄数选择器一致）
+  - 验证：`npm test` 测试通过，修改时长同步到设置页
+
 # Task Dependencies
 
 - Task 2 依赖 Task 1
@@ -206,3 +257,9 @@
 - Task 16 依赖 Task 7
 - Task 18 依赖 Task 9、Task 13
 - Task 17 可并行
+- Task 24 无依赖，可先行
+- Task 25 依赖 Task 16（Stats 页面已存在），可并行于 Task 24
+- Task 26 依赖 Task 7（Store 已存在），可并行于 Task 24、25
+- Task 27 依赖 Task 26.1（day_start_hour）和 Task 26.3（数据库字段）
+- Task 28 依赖 Task 26.2（auto_start_break 设置）和 Task 26.3（数据库字段）
+- Task 29 可并行于 Task 28（共享 Pomodoro 页面但独立功能）

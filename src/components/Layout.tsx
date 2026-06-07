@@ -31,7 +31,7 @@ export default function Layout() {
       <SettingsLoader />
       <SyncEngine />
       <Sidebar />
-      <main className="flex-1 overflow-auto bg-light-bg dark:bg-dark-bg">
+      <main className="flex-1 overflow-auto bg-light-bg dark:bg-dark-bg transition-all">
         <Outlet />
       </main>
     </div>

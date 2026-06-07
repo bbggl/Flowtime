@@ -32,6 +32,8 @@ interface PomodoroState {
   dailyGoal: number
   soundEnabled: boolean
   notificationEnabled: boolean
+  dayStartHour: number
+  autoStartBreak: boolean
 
   // Actions
   loadRecords: () => Promise<void>
@@ -46,6 +48,9 @@ interface PomodoroState {
   linkTask: (taskId: string, taskTitle: string) => void
   unlinkTask: () => void
   setDurations: (settings: DurationSettings) => void
+  setDuration: (mode: PomodoroMode, minutes: number) => void
+  setDayStartHour: (hour: number) => void
+  setAutoStartBreak: (on: boolean) => void
   setSoundEnabled: (on: boolean) => void
   setNotificationEnabled: (on: boolean) => void
 
@@ -138,6 +143,8 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
     dailyGoal: loadCached('dailyGoal', 8),
     soundEnabled: true,
     notificationEnabled: true,
+    dayStartHour: loadCached('dayStartHour', 0),
+    autoStartBreak: localStorage.getItem('flowtime-autoStartBreak') === 'true',
 
     // ---- Load from Supabase (with offline fallback) ----
     async loadRecords() {
@@ -222,6 +229,8 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
             dailyGoal: data.daily_goal ?? 8,
             soundEnabled: data.sound_enabled ?? true,
             notificationEnabled: data.notification_enabled ?? true,
+            dayStartHour: data.day_start_hour ?? 0,
+            autoStartBreak: data.auto_start_break ?? false,
             remainingSeconds,
           }
         })
@@ -234,6 +243,8 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
       saveCached('longBreakDuration', s.longBreakDuration)
       saveCached('longBreakInterval', s.longBreakInterval)
       saveCached('dailyGoal', s.dailyGoal)
+      saveCached('dayStartHour', s.dayStartHour)
+      localStorage.setItem('flowtime-autoStartBreak', String(s.autoStartBreak))
       localStorage.setItem('flowtime-sound', String(s.soundEnabled))
       localStorage.setItem('flowtime-notification', String(s.notificationEnabled))
     },
@@ -496,6 +507,53 @@ export const createPomodoroStore = (supabase: SupabaseClient) => {
           .neq('user_id', '00000000-0000-0000-0000-000000000000')
           .then(({ error }) => {
             if (error) console.warn('Settings update failed:', error.message)
+          })
+      }
+    },
+
+    setDuration(mode, minutes) {
+      const seconds = minutes * 60
+      const settings: DurationSettings = {}
+      if (mode === 'work') settings.work_duration = seconds
+      else if (mode === 'short_break') settings.short_break_duration = seconds
+      else settings.long_break_duration = seconds
+
+      // Use existing setDurations which handles localStorage + Supabase persistence
+      get().setDurations(settings)
+
+      // If idle and current mode matches, update remainingSeconds too
+      const state = get()
+      if (state.status === 'idle' && state.mode === mode) {
+        set({ remainingSeconds: seconds })
+      }
+      // If timer is running, DON'T change remainingSeconds — only affects next session
+    },
+
+    setDayStartHour(hour) {
+      const clamped = Math.max(0, Math.min(7, Math.round(hour)))
+      set({ dayStartHour: clamped })
+      saveCached('dayStartHour', clamped)
+      if (isRealSupabase) {
+        supabase
+          .from('user_settings')
+          .update({ day_start_hour: clamped })
+          .neq('user_id', '00000000-0000-0000-0000-000000000000')
+          .then(({ error }) => {
+            if (error) console.warn('day_start_hour update failed:', error.message)
+          })
+      }
+    },
+
+    setAutoStartBreak(on) {
+      set({ autoStartBreak: on })
+      localStorage.setItem('flowtime-autoStartBreak', String(on))
+      if (isRealSupabase) {
+        supabase
+          .from('user_settings')
+          .update({ auto_start_break: on })
+          .neq('user_id', '00000000-0000-0000-0000-000000000000')
+          .then(({ error }) => {
+            if (error) console.warn('auto_start_break update failed:', error.message)
           })
       }
     },

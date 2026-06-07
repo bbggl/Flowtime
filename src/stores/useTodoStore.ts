@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Todo } from '../types'
 import { cacheTable, loadCachedTable, isOnline } from '../lib/offlineDb'
+import { isNewDay } from '../utils/time'
 
 export interface Category {
   id: string
@@ -67,6 +68,24 @@ interface TodoState {
   handleRealtimeInsert: (todo: Todo) => void
   handleRealtimeUpdate: (todo: Todo) => void
   handleRealtimeDelete: (id: string) => void
+
+  // Multi-select state (Task 27)
+  isMultiSelectMode: boolean
+  selectedTodoIds: Set<string>
+  toggleMultiSelectMode: () => void
+  toggleTodoSelection: (id: string) => void
+  clearSelection: () => void
+
+  // Batch operations (Task 27)
+  syncToToday: (ids: string[]) => void
+  uncompleteTodos: (ids: string[]) => void
+  moveTodos: (ids: string[], targetCategory: string) => void
+  copyTodos: (ids: string[], targetCategory: string) => void
+
+  // Sync cleanup (Task 27)
+  breakExpiredSync: () => void
+  setDayStartHour: (hour: number) => void
+  dayStartHour: number
 }
 
 let idCounter = 0
@@ -75,7 +94,12 @@ function nextId(): string {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const hour = parseInt(localStorage.getItem('flowtime-dayStartHour') || '0', 10)
+  const d = now.getHours() < hour
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+    : now
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export const createTodoStore = (supabase: SupabaseClient) => {
@@ -86,10 +110,20 @@ export const createTodoStore = (supabase: SupabaseClient) => {
     categories: [...SYSTEM_CATEGORIES, ...loadCustomCategories()],
     currentCategory: 'today',
     selectedDate: null,
+    isMultiSelectMode: false,
+    selectedTodoIds: new Set<string>(),
+    dayStartHour: 0,
 
     // ---- Load from Supabase (with offline fallback) ----
     async loadTodos() {
-      if (!isRealSupabase) return
+      if (!isRealSupabase) {
+        // 没有 Supabase 时从 IndexedDB 加载
+        const cached = await loadCachedTable<Todo>('todos')
+        if (cached.length > 0) {
+          set({ todos: cached as Todo[] })
+        }
+        return
+      }
 
       if (isOnline()) {
         const { data, error } = await supabase
@@ -163,7 +197,11 @@ export const createTodoStore = (supabase: SupabaseClient) => {
       }
 
       // 乐观更新本地状态
-      set({ todos: [...get().todos, todo] })
+      const updatedTodos = [...get().todos, todo]
+      set({ todos: updatedTodos })
+
+      // 缓存到 IndexedDB，确保刷新后数据不丢失
+      cacheTable('todos', updatedTodos)
 
       // 同步写入 Supabase
       if (isRealSupabase) {
@@ -188,6 +226,8 @@ export const createTodoStore = (supabase: SupabaseClient) => {
               set({
                 todos: get().todos.map((t) => (t.id === todo.id ? (data as Todo) : t)),
               })
+              // 服务器返回后再次缓存，确保 IndexedDB 中的 ID 与服务器一致
+              cacheTable('todos', get().todos)
             } else if (error) {
               console.warn('Todo insert failed:', error.message)
             }
@@ -196,28 +236,40 @@ export const createTodoStore = (supabase: SupabaseClient) => {
     },
 
     toggleTodo(id) {
-      const todo = get().todos.find((t) => t.id === id)
+      const todos = get().todos
+      const todo = todos.find((t) => t.id === id)
       if (!todo) return
 
       const nextStatus: Todo['status'] = todo.status === 'pending' ? 'done' : 'pending'
       const completed_at = nextStatus === 'done' ? new Date().toISOString() : null
 
+      // Collect all related ids to toggle: source + synced copies
+      const idsToToggle = new Set<string>([id])
+      // If this todo is the source (other todos have synced_from_id pointing to it)
+      for (const t of todos) {
+        if (t.synced_from_id === id) idsToToggle.add(t.id)
+      }
+      // If this todo is a synced copy, also toggle the source
+      if (todo.synced_from_id) idsToToggle.add(todo.synced_from_id)
+
       set({
-        todos: get().todos.map((t) => {
-          if (t.id !== id) return t
+        todos: todos.map((t) => {
+          if (!idsToToggle.has(t.id)) return t
           return { ...t, status: nextStatus, completed_at: completed_at ?? undefined }
         }),
       })
 
       // 同步更新 Supabase
       if (isRealSupabase) {
-        supabase
-          .from('todos')
-          .update({ status: nextStatus, completed_at })
-          .eq('id', id)
-          .then(({ error }) => {
-            if (error) console.warn('Todo toggle failed:', error.message)
-          })
+        for (const tid of idsToToggle) {
+          supabase
+            .from('todos')
+            .update({ status: nextStatus, completed_at })
+            .eq('id', tid)
+            .then(({ error }) => {
+              if (error) console.warn('Todo toggle failed:', error.message)
+            })
+        }
       }
     },
 
@@ -260,16 +312,32 @@ export const createTodoStore = (supabase: SupabaseClient) => {
     },
 
     deleteTodo(id) {
-      set({ todos: get().todos.filter((t) => t.id !== id) })
+      const state = get()
+      const todo = state.todos.find((t) => t.id === id)
+      if (!todo) return
+
+      // 收集所有需要删除的 ID
+      // - 删除源待办时，同时删除所有关联副本
+      // - 删除关联副本时，仅删除副本自身（不影响源待办）
+      const idsToDelete = new Set<string>([id])
+
+      // 如果被删除的是源待办，同时删除所有关联副本（synced_from_id 指向它的）
+      for (const t of state.todos) {
+        if (t.synced_from_id === id) idsToDelete.add(t.id)
+      }
+
+      // 清理引用
+      set({
+        todos: state.todos.filter((t) => !idsToDelete.has(t.id)),
+      })
 
       if (isRealSupabase) {
-        supabase
-          .from('todos')
-          .delete()
-          .eq('id', id)
-          .then(({ error }) => {
-            if (error) console.warn('Todo delete failed:', error.message)
-          })
+        const ids = Array.from(idsToDelete)
+        Promise.all(
+          ids.map((delId) =>
+            supabase.from('todos').delete().eq('id', delId),
+          ),
+        ).catch((err) => console.warn('Todo batch delete failed:', err))
       }
     },
 
@@ -401,6 +469,257 @@ export const createTodoStore = (supabase: SupabaseClient) => {
 
     handleRealtimeDelete(id: string) {
       set({ todos: get().todos.filter((t) => t.id !== id) })
+    },
+
+    // ---- Multi-select (Task 27) ----
+
+    toggleMultiSelectMode() {
+      set({
+        isMultiSelectMode: !get().isMultiSelectMode,
+        selectedTodoIds: get().isMultiSelectMode ? new Set<string>() : get().selectedTodoIds,
+      })
+    },
+
+    toggleTodoSelection(id) {
+      const next = new Set(get().selectedTodoIds)
+      if (next.has(id)) {
+        next.delete(id)
+        // 取消选中后如果没有任何选中项，退出多选模式
+        if (next.size === 0) {
+          set({ selectedTodoIds: next, isMultiSelectMode: false })
+          return
+        }
+      } else {
+        next.add(id)
+      }
+      set({ selectedTodoIds: next })
+    },
+
+    clearSelection() {
+      set({ selectedTodoIds: new Set<string>() })
+    },
+
+    syncToToday(ids) {
+      const todos = get().todos
+      const now = new Date().toISOString()
+      const date = todayStr()
+
+      const copies: Todo[] = []
+      let minOrder = 0
+      let first = true
+      for (const t of todos) {
+        if (first || t.sort_order < minOrder) {
+          minOrder = t.sort_order
+          first = false
+        }
+      }
+
+      for (const id of ids) {
+        const src = todos.find((t) => t.id === id)
+        if (!src) continue
+        const newTodo: Todo = {
+          id: nextId(),
+          user_id: src.user_id,
+          title: src.title,
+          description: src.description,
+          status: src.status,
+          priority: src.priority,
+          category: 'today',
+          date,
+          estimated_pomos: 0,
+          completed_pomos: 0,
+          sort_order: --minOrder,
+          created_at: now,
+          completed_at: src.completed_at,
+          synced_from_id: src.id,
+        }
+        copies.push(newTodo)
+      }
+
+      if (copies.length === 0) return
+
+      const updatedTodos = [...todos, ...copies]
+      set({
+        todos: updatedTodos,
+        isMultiSelectMode: false,
+        selectedTodoIds: new Set<string>(),
+      })
+
+      // 缓存到 IndexedDB，确保刷新后数据不丢失
+      cacheTable('todos', updatedTodos)
+
+      if (isRealSupabase) {
+        for (const c of copies) {
+          supabase
+            .from('todos')
+            .insert({
+              title: c.title,
+              description: c.description ?? null,
+              status: c.status,
+              priority: c.priority,
+              category: c.category,
+              date: c.date ?? null,
+              estimated_pomos: c.estimated_pomos,
+              completed_pomos: c.completed_pomos,
+              sort_order: c.sort_order,
+              synced_from_id: c.synced_from_id,
+            })
+            .select()
+            .single()
+            .then(({ data, error }) => {
+              if (!error && data) {
+                set({
+                  todos: get().todos.map((t) => (t.id === c.id ? (data as Todo) : t)),
+                })
+                // 服务器返回后再次缓存，确保 IndexedDB 中的 ID 与服务器一致
+                cacheTable('todos', get().todos)
+              }
+            })
+        }
+      }
+    },
+
+    uncompleteTodos(ids) {
+      const todos = get().todos
+      const updated = todos.map((t) => {
+        if (ids.includes(t.id) && t.status === 'done') {
+          return { ...t, status: 'pending' as const, completed_at: undefined }
+        }
+        return t
+      })
+
+      set({ todos: updated })
+
+      if (isRealSupabase) {
+        for (const id of ids) {
+          const todo = todos.find((t) => t.id === id)
+          if (!todo || todo.status !== 'done') continue
+          supabase
+            .from('todos')
+            .update({ status: 'pending', completed_at: null })
+            .eq('id', id)
+            .then(({ error }) => {
+              if (error) console.warn('Uncomplete failed:', error.message)
+            })
+        }
+      }
+    },
+
+    moveTodos(ids, targetCategory) {
+      set({
+        todos: get().todos.map((t) =>
+          ids.includes(t.id) ? { ...t, category: targetCategory } : t,
+        ),
+        isMultiSelectMode: false,
+        selectedTodoIds: new Set<string>(),
+      })
+
+      if (isRealSupabase) {
+        for (const id of ids) {
+          supabase
+            .from('todos')
+            .update({ category: targetCategory })
+            .eq('id', id)
+            .then(({ error }) => {
+              if (error) console.warn('Move failed:', error.message)
+            })
+        }
+      }
+    },
+
+    copyTodos(ids, targetCategory) {
+      const todos = get().todos
+      const now = new Date().toISOString()
+      const copies: Todo[] = []
+
+      for (const id of ids) {
+        const src = todos.find((t) => t.id === id)
+        if (!src) continue
+        copies.push({
+          ...src,
+          id: nextId(),
+          category: targetCategory,
+          created_at: now,
+          synced_from_id: undefined,
+        })
+      }
+
+      if (copies.length === 0) return
+
+      set({
+        todos: [...todos, ...copies],
+        isMultiSelectMode: false,
+        selectedTodoIds: new Set<string>(),
+      })
+
+      if (isRealSupabase) {
+        for (const c of copies) {
+          supabase
+            .from('todos')
+            .insert({
+              title: c.title,
+              description: c.description ?? null,
+              status: c.status,
+              priority: c.priority,
+              category: c.category,
+              date: c.date ?? null,
+              estimated_pomos: c.estimated_pomos,
+              completed_pomos: c.completed_pomos,
+              sort_order: c.sort_order,
+            })
+            .select()
+            .single()
+            .then(({ data, error }) => {
+              if (!error && data) {
+                set({
+                  todos: get().todos.map((t) => (t.id === c.id ? (data as Todo) : t)),
+                })
+              }
+            })
+        }
+      }
+    },
+
+    // ---- Sync cleanup (Task 27) ----
+
+    breakExpiredSync() {
+      const todos = get().todos
+      const dayStart = get().dayStartHour
+      let changed = false
+
+      const updated = todos.map((t) => {
+        if (t.category === 'today' && t.synced_from_id) {
+          const source = todos.find((s) => s.id === t.synced_from_id)
+          const sourceDate = source?.date
+          if (!source || (sourceDate && isNewDay(dayStart, sourceDate))) {
+            changed = true
+            return { ...t, synced_from_id: undefined }
+          }
+        }
+        return t
+      })
+
+      if (!changed) return
+
+      set({ todos: updated })
+
+      if (isRealSupabase) {
+        for (const t of updated) {
+          if (t.category === 'today' && !t.synced_from_id) {
+            supabase
+              .from('todos')
+              .update({ synced_from_id: null })
+              .eq('id', t.id)
+              .then(({ error }) => {
+                if (error) console.warn('Break expired sync (copy) failed:', error.message)
+              })
+          }
+        }
+      }
+    },
+
+    setDayStartHour(hour) {
+      set({ dayStartHour: hour })
     },
 
     getFilteredTodos() {

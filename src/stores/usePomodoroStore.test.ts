@@ -340,5 +340,37 @@ describe('usePomodoroStore', () => {
       store.getState().completedCount = 4
       expect(store.getState().shouldSuggestLongBreak()).toBe(true)
     })
+
+    // --- Task 26: 设置页增强 ---
+    describe('day_start_hour', () => {
+      it('defaults to 0', () => {
+        expect(store.getState().dayStartHour).toBe(0)
+      })
+
+      it('setDayStartHour updates value and localStorage', () => {
+        store.getState().setDayStartHour(3)
+        expect(store.getState().dayStartHour).toBe(3)
+        expect(localStorage.getItem('flowtime-dayStartHour')).toBe('3')
+      })
+
+      it('clamps value between 0-7', () => {
+        store.getState().setDayStartHour(-1)
+        expect(store.getState().dayStartHour).toBe(0)
+        store.getState().setDayStartHour(10)
+        expect(store.getState().dayStartHour).toBe(7)
+      })
+    })
+
+    describe('auto_start_break', () => {
+      it('defaults to false', () => {
+        expect(store.getState().autoStartBreak).toBe(false)
+      })
+
+      it('setAutoStartBreak updates value and localStorage', () => {
+        store.getState().setAutoStartBreak(true)
+        expect(store.getState().autoStartBreak).toBe(true)
+        expect(localStorage.getItem('flowtime-autoStartBreak')).toBe('true')
+      })
+    })
   })
 })

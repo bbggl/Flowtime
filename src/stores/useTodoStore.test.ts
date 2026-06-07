@@ -77,7 +77,12 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const hour = parseInt(localStorage.getItem('flowtime-dayStartHour') || '0', 10)
+  const d = now.getHours() < hour
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+    : now
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +372,195 @@ describe('useTodoStore', () => {
       store.getState().addTodo('Keep me', 'work')
       store.getState().handleRealtimeDelete('unknown')
       expect(store.getState().todos).toHaveLength(1)
+    })
+  })
+
+  // =========================================================================
+  // Task 27: Multi-select & sync
+  // =========================================================================
+
+  describe('syncToToday', () => {
+    it('creates a copy with synced_from_id, correct category/date', () => {
+      store.getState().addTodo('Source task', 'work')
+      const src = store.getState().todos[0]
+      const today = todayStr()
+
+      store.getState().syncToToday([src.id])
+
+      const todos = store.getState().todos
+      // Should have 2 todos: source + copy
+      const copy = todos.find((t) => t.id !== src.id)
+      expect(copy).toBeDefined()
+      expect(copy!.title).toBe('Source task')
+      expect(copy!.synced_from_id).toBe(src.id)
+      expect(copy!.category).toBe('today')
+      expect(copy!.date).toBe(today)
+      expect(copy!.estimated_pomos).toBe(0)
+      expect(copy!.completed_pomos).toBe(0)
+    })
+
+    it('exits multi-select mode after sync', () => {
+      store.getState().addTodo('Task', 'work')
+      store.getState().toggleMultiSelectMode()
+      expect(store.getState().isMultiSelectMode).toBe(true)
+
+      store.getState().syncToToday([store.getState().todos[0].id])
+      expect(store.getState().isMultiSelectMode).toBe(false)
+    })
+  })
+
+  describe('toggleTodo with sync', () => {
+    it('toggling source also toggles synced copy', () => {
+      store.getState().addTodo('Source', 'work')
+      const src = store.getState().todos[0]
+      store.getState().syncToToday([src.id])
+      // Find the synced copy
+      const copy = store.getState().todos.find((t) => t.synced_from_id === src.id)
+      expect(copy).toBeDefined()
+
+      // Toggle source
+      store.getState().toggleTodo(src.id)
+      const todos = store.getState().todos
+      const updatedSrc = todos.find((t) => t.id === src.id)
+      const updatedCopy = todos.find((t) => t.synced_from_id === src.id)
+      expect(updatedSrc!.status).toBe('done')
+      expect(updatedCopy!.status).toBe('done')
+    })
+
+    it('toggling synced copy also toggles source', () => {
+      store.getState().addTodo('Source', 'work')
+      const src = store.getState().todos[0]
+      store.getState().syncToToday([src.id])
+      const copy = store.getState().todos.find((t) => t.synced_from_id === src.id)
+      expect(copy).toBeDefined()
+
+      // Toggle the synced copy
+      store.getState().toggleTodo(copy!.id)
+      const todos = store.getState().todos
+      const updatedSrc = todos.find((t) => t.id === src.id)
+      expect(updatedSrc!.status).toBe('done')
+    })
+  })
+
+  describe('breakExpiredSync', () => {
+    it('removes synced_from_id for expired syncs', () => {
+      // Create a source with an old date
+      store.getState().addTodo('Old source', 'work')
+      const src = store.getState().todos[0]
+
+      // Create a synced copy manually with synced_from_id
+      const copy = makeTodo({
+        title: 'Old source',
+        category: 'today',
+        date: todayStr(),
+        synced_from_id: src.id,
+        estimated_pomos: 0,
+      })
+      store.setState({ todos: [...store.getState().todos, copy] })
+
+      // Set source date to an old date
+      const state = store.getState()
+      store.setState({
+        todos: state.todos.map((t) =>
+          t.id === src.id ? { ...t, date: '2020-01-01' } : t,
+        ),
+      })
+
+      store.getState().breakExpiredSync()
+
+      const todos = store.getState().todos
+      const updatedCopy = todos.find((t) => t.id === copy.id)
+      expect(updatedCopy!.synced_from_id).toBeUndefined()
+    })
+  })
+
+  describe('uncompleteTodos', () => {
+    it('sets status to pending, only for done todos', () => {
+      store.getState().addTodo('Done task', 'work')
+      store.getState().addTodo('Pending task', 'work')
+      const doneId = store.getState().todos[0].id
+      const pendingId = store.getState().todos[1].id
+      store.getState().toggleTodo(doneId)
+
+      store.getState().uncompleteTodos([doneId, pendingId])
+
+      const todos = store.getState().todos
+      expect(todos.find((t) => t.id === doneId)!.status).toBe('pending')
+      expect(todos.find((t) => t.id === pendingId)!.status).toBe('pending')
+    })
+  })
+
+  describe('moveTodos', () => {
+    it('changes category', () => {
+      store.getState().addTodo('Task A', 'work')
+      store.getState().addTodo('Task B', 'work')
+      const ids = store.getState().todos.map((t) => t.id)
+
+      store.getState().moveTodos(ids, 'personal')
+
+      const todos = store.getState().todos
+      expect(todos.every((t) => t.category === 'personal')).toBe(true)
+    })
+
+    it('exits multi-select mode', () => {
+      store.getState().addTodo('Task', 'work')
+      store.getState().toggleMultiSelectMode()
+      expect(store.getState().isMultiSelectMode).toBe(true)
+
+      store.getState().moveTodos([store.getState().todos[0].id], 'personal')
+      expect(store.getState().isMultiSelectMode).toBe(false)
+    })
+  })
+
+  describe('copyTodos', () => {
+    it('creates copies with new ids', () => {
+      store.getState().addTodo('Task A', 'work')
+      const srcId = store.getState().todos[0].id
+
+      store.getState().copyTodos([srcId], 'personal')
+
+      const todos = store.getState().todos
+      // Should have original + 1 copy
+      expect(todos).toHaveLength(2)
+      const copy = todos.find((t) => t.id !== srcId)
+      expect(copy).toBeDefined()
+      expect(copy!.title).toBe('Task A')
+      expect(copy!.category).toBe('personal')
+      expect(copy!.synced_from_id).toBeUndefined()
+    })
+
+    it('exits multi-select mode', () => {
+      store.getState().addTodo('Task', 'work')
+      store.getState().toggleMultiSelectMode()
+      expect(store.getState().isMultiSelectMode).toBe(true)
+
+      store.getState().copyTodos([store.getState().todos[0].id], 'personal')
+      expect(store.getState().isMultiSelectMode).toBe(false)
+    })
+  })
+
+  describe('multi-select state', () => {
+    it('toggleMultiSelectMode toggles the flag', () => {
+      expect(store.getState().isMultiSelectMode).toBe(false)
+      store.getState().toggleMultiSelectMode()
+      expect(store.getState().isMultiSelectMode).toBe(true)
+      store.getState().toggleMultiSelectMode()
+      expect(store.getState().isMultiSelectMode).toBe(false)
+    })
+
+    it('toggleTodoSelection adds/removes ids', () => {
+      expect(store.getState().selectedTodoIds.size).toBe(0)
+      store.getState().toggleTodoSelection('id1')
+      expect(store.getState().selectedTodoIds.has('id1')).toBe(true)
+      store.getState().toggleTodoSelection('id1')
+      expect(store.getState().selectedTodoIds.has('id1')).toBe(false)
+    })
+
+    it('clearSelection empties the set', () => {
+      store.getState().toggleTodoSelection('id1')
+      store.getState().toggleTodoSelection('id2')
+      store.getState().clearSelection()
+      expect(store.getState().selectedTodoIds.size).toBe(0)
     })
   })
 })

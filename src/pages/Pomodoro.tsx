@@ -8,12 +8,12 @@ import type { Todo } from '../types'
 
 // ── Mode labels (key → display name) ────────────────────────────────────────
 const MODE_LABELS: Record<PomodoroMode, string> = {
-  work: '工作',
-  short_break: '短休',
-  long_break: '长休',
+  work: '专注',
+  short_break: '休息',
+  long_break: '休息',
 }
 
-const MODE_ORDER: PomodoroMode[] = ['work', 'short_break', 'long_break']
+const VISIBLE_MODES: PomodoroMode[] = ['work', 'short_break']
 
 // ── SVG ring constants ───────────────────────────────────────────────────────
 const VIEWBOX = 100
@@ -108,6 +108,7 @@ export default function Pomodoro() {
   const storeWorkDuration = useStore(usePomodoroStore, (s) => s.workDuration)
   const storeShortBreakDuration = useStore(usePomodoroStore, (s) => s.shortBreakDuration)
   const storeLongBreakDuration = useStore(usePomodoroStore, (s) => s.longBreakDuration)
+  const setDuration = usePomodoroStore((s) => s.setDuration)
   const allTodos = useStore(useTodoStore, (s) => s.todos)
   const formattedTime = useMemo(() => formatTime(remainingSeconds), [remainingSeconds])
 
@@ -141,6 +142,9 @@ export default function Pomodoro() {
   const [taskDropdownOpen, setTaskDropdownOpen] = useState(false)
   const taskDropdownRef = useRef<HTMLDivElement>(null)
 
+  const [durationEditing, setDurationEditing] = useState(false)
+  const durationEditRef = useRef<HTMLButtonElement>(null)
+
   // Click outside to close task dropdown
   useEffect(() => {
     if (!taskDropdownOpen) return
@@ -152,6 +156,39 @@ export default function Pomodoro() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [taskDropdownOpen])
+
+  // Click outside to exit duration editing
+  useEffect(() => {
+    if (!durationEditing) return
+    const handler = (e: MouseEvent) => {
+      if (durationEditRef.current && !durationEditRef.current.contains(e.target as Node)) {
+        setDurationEditing(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [durationEditing])
+
+  // Wheel handler for duration editing
+  const handleDurationWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!durationEditing) return
+      e.preventDefault()
+      const currentMin = Math.round(
+        (mode === 'work'
+          ? storeWorkDuration
+          : mode === 'short_break'
+            ? storeShortBreakDuration
+            : storeLongBreakDuration
+        ) / 60,
+      )
+      const delta = e.deltaY > 0 ? -1 : 1
+      const newMin = Math.max(1, Math.min(60, currentMin + delta))
+      setDuration(mode, newMin)
+    },
+    [durationEditing, mode, storeWorkDuration, storeShortBreakDuration, storeLongBreakDuration, setDuration],
+  )
+
   const [flashRing, setFlashRing] = useState(false)
   const [showLongBreakTip, setShowLongBreakTip] = useState(false)
   const dismissedBreakCountRef = useRef<number>(-1)
@@ -241,6 +278,25 @@ export default function Pomodoro() {
           `已完成 ${completedCount} 个番茄，继续加油！`,
         )
       }
+
+      // Auto-revert from long_break to short_break after long break finishes
+      if (mode === 'long_break') {
+        usePomodoroStore.setState({ mode: 'short_break' })
+      }
+
+      // Auto-start break after work completes
+      const autoStartBreak = usePomodoroStore.getState().autoStartBreak
+      if (autoStartBreak && mode === 'work') {
+        setTimeout(() => {
+          const s = usePomodoroStore.getState()
+          if (s.status === 'finished' && s.mode === 'work') {
+            if (!s.shouldSuggestLongBreak()) {
+              s.setMode('short_break')
+              s.start()
+            }
+          }
+        }, 1500)
+      }
     }
   }, [status, mode, completedCount])
 
@@ -255,7 +311,10 @@ export default function Pomodoro() {
   const handleAcceptLongBreak = useCallback(() => {
     dismissedBreakCountRef.current = completedCount
     setShowLongBreakTip(false)
-    usePomodoroStore.getState().setMode('long_break')
+    const store = usePomodoroStore.getState()
+    store.setMode('long_break')
+    // Auto-start the long break timer
+    store.start()
   }, [completedCount])
 
   const handleDismissLongBreakTip = useCallback(() => {
@@ -330,28 +389,36 @@ export default function Pomodoro() {
 
       {/* ── Mode switch ────────────────────────────────────────────────── */}
       <div className="flex gap-2 mb-8">
-        {MODE_ORDER.map((key) => (
-          <button
-            key={key}
-            onClick={() => {
-              usePomodoroStore.getState().setMode(key)
-              setShowLongBreakTip(false)
-            }}
-            disabled={isRunning}
-            className={`
-              px-5 py-2 rounded-full text-sm font-medium transition-colors
-              disabled:opacity-60
-              ${
-                mode === key
-                  ? 'bg-primary text-white dark:bg-primary-dark dark:text-dark-bg'
-                  : 'bg-light-card dark:bg-dark-card text-light-text-secondary dark:text-dark-text-secondary border border-light-border dark:border-dark-border'
-              }
-            `}
-          >
-            {MODE_LABELS[key]}
-            <span className="ml-1 opacity-70">{Math.round(modeDurations[key] / 60)}min</span>
-          </button>
-        ))}
+        {VISIBLE_MODES.map((key) => {
+          const isWork = key === 'work'
+          const isActive = isWork ? mode === 'work' : (mode === 'short_break' || mode === 'long_break')
+          const displayDuration = isWork
+            ? modeDurations.work
+            : (mode === 'long_break' ? modeDurations.long_break : modeDurations.short_break)
+
+          return (
+            <button
+              key={key}
+              onClick={() => {
+                usePomodoroStore.getState().setMode(key)
+                setShowLongBreakTip(false)
+              }}
+              disabled={isRunning}
+              className={`
+                px-5 py-2 rounded-full text-sm font-medium transition-colors
+                disabled:opacity-60
+                ${
+                  isActive
+                    ? 'bg-primary text-white dark:bg-primary-dark dark:text-dark-bg'
+                    : 'bg-light-card dark:bg-dark-card text-light-text-secondary dark:text-dark-text-secondary border border-light-border dark:border-dark-border'
+                }
+              `}
+            >
+              {MODE_LABELS[key]}
+              <span className="ml-1 opacity-70">{Math.round(displayDuration / 60)}min</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* ── Timer ring + center display ────────────────────────────────── */}
@@ -385,11 +452,22 @@ export default function Pomodoro() {
           />
         </svg>
 
-        {/* Center time display */}
+        {/* Center time display — clickable to edit duration */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-6xl font-mono font-bold tracking-tight text-light-text dark:text-dark-text">
+          <button
+            ref={durationEditRef}
+            onClick={() => setDurationEditing((v) => !v)}
+            onWheel={handleDurationWheel}
+            className={`relative text-6xl font-mono font-bold tracking-tight transition-all cursor-pointer select-none
+              ${durationEditing
+                ? 'text-primary dark:text-primary-dark ring-2 ring-primary dark:ring-primary-dark rounded-2xl px-3 py-1'
+                : 'text-light-text dark:text-dark-text hover:text-primary dark:hover:text-primary-dark'
+              }`}
+            title={durationEditing ? '滚轮调整分钟，点击外部退出' : '点击修改时长'}
+          >
             {isFinished ? '00:00' : formattedTime}
-          </span>
+          </button>
+
           {isFinished && (
             <span className="mt-1 text-sm font-medium text-primary dark:text-primary-dark animate-pulse">
               {mode === 'work' ? '完成！' : '休息结束'}

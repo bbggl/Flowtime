@@ -209,7 +209,12 @@ export default function Dashboard() {
   const isEmpty = todos.length === 0 && completedCount === 0 && notes.length === 0
 
   function todayStr(): string {
-    return new Date().toISOString().slice(0, 10)
+    const now = new Date()
+    const hour = parseInt(localStorage.getItem('flowtime-dayStartHour') || '0', 10)
+    const d = now.getHours() < hour
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+      : now
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }
 
   // Calendar helpers (timezone-safe, same logic as Todo calendar)

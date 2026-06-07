@@ -1,13 +1,13 @@
 # Checklist
 
 ## 阶段一：项目初始化与基础框架
-- [ ] Vite 项目可启动，`npm run dev` 无报错
-- [ ] Tailwind CSS 配色变量正确，暗色模式 class 切换生效
-- [ ] 所有 6 条路由（`/`、`/stats`、`/todo`、`/pomodoro`、`/notes`、`/settings`）可访问
-- [ ] 侧边栏 64px 宽，5 个导航按钮 + 主题切换 + 设置按钮齐全
-- [ ] 侧边栏当前页面对应按钮高亮（紫色填充 + 白色图标）
-- [ ] 暗色模式手动切换正常，刷新后保持偏好
-- [ ] 暗色模式自动跟随系统正常（未手动设置时）
+- [x] Vite 项目可启动，`npm run dev` 无报错
+- [x] Tailwind CSS 配色变量正确，暗色模式 class 切换生效
+- [x] 所有 6 条路由（`/`、`/stats`、`/todo`、`/pomodoro`、`/notes`、`/settings`）可访问
+- [x] 侧边栏 64px 宽，5 个导航按钮 + 主题切换 + 设置按钮齐全
+- [x] 侧边栏当前页面对应按钮高亮（紫色填充 + 白色图标）
+- [x] 暗色模式手动切换正常，刷新后保持偏好
+- [x] 暗色模式自动跟随系统正常（未手动设置时）
 
 ## 阶段二：Supabase 集成
 - [x] Supabase 数据库表（todos、pomodoro_records、notes、user_settings）已创建
@@ -117,3 +117,53 @@
 - [x] 退出登录按钮：清除认证 → 跳转 /auth
 - [x] 设置保存到 Supabase，刷新后保持
 - [x] 番茄钟 ↔ 待办联动端到端正常（Todo 启动 → 番茄完成 → 计数更新）
+
+## 阶段十一：功能增强
+
+### 侧边栏展开
+- [x] 侧边栏底部有展开/收起按钮（ChevronLeft/ChevronRight 图标切换）
+- [x] 收起态 64px 宽仅显示图标，展开态约 180px 宽显示图标+文字标题
+- [x] 展开/收起状态持久化到 localStorage，刷新后保持
+- [x] 展开/收起切换无视觉跳动
+
+### 统计页日均专注
+- [x] "总专注时长"卡片后显示"日均专注时长"卡片
+- [x] 日均值按粒度和时间范围正确计算
+- [x] 格式为 X小时X分钟，空数据时显示 0小时0分钟
+
+### 设置页增强
+- [x] "今日切换时间点"滑块：范围 0:00~7:00，每小时一档，默认 0:00
+- [x] "专注结束后自动开始休息"开关：默认关闭
+- [x] 修改即时生效，持久化到 Supabase `user_settings`，刷新后保持
+- [x] 数据库 `user_settings` 表已新增 `day_start_hour`、`auto_start_break` 字段
+
+### 待办多选与同步
+- [x] 非"今天"分类右上角有"多选"按钮，点击进入多选模式
+- [x] 多选模式下每个待办有勾选框，选中后边缘 ring-2 ring-primary 高亮
+- [x] 底部操作栏："同步到今天""取消完成""移动/复制到"
+- [x] "同步到今天"：在"今天"分类下创建关联副本（synced_from_id 指向源待办）
+- [x] 关联副本的完成状态与源待办实时同步（双向）
+- [x] 次日到达 day_start_hour 时，synced_from_id 自动置空，副本独立
+- [x] "取消完成"：批量将选中已完成待办恢复为 pending
+- [x] 移动/复制：弹出分类选择器，移动改 category，复制创建副本
+- [x] "今天"分类下 synced_from_id 不为空的待办也显示移动/复制选项
+- [x] 数据库 `todos` 表已新增 `synced_from_id` 字段
+
+### 番茄钟按钮合并
+- [x] 番茄钟页面仅显示"专注 | 休息"两个按钮，休息按钮默认显示短休息时长
+- [x] 长休息提醒弹窗 → 确认 → 自动切换到长休息时长并开始计时
+- [x] 长休息结束后 → 休息按钮时长自动切回短休息时长
+- [x] 取消长休息 → 不进入长休息，可手动开始短休息
+- [x] `auto_start_break` 开启时：专注结束后自动进入休息并开始计时
+
+### 点击计时数字修改时长
+- [x] 计时数字可点击，弹出分钟选择器（风格与番茄数选择器一致）
+- [x] 选择后更新当前模式预设时长 + 同步设置页 + 持久化 Supabase
+- [x] 运行时修改不影响当前倒计时，仅影响下次开始该模式
+
+### TDD 验收
+- [x] `npm test` 运行通过，新增测试全部覆盖
+- [x] useTodoStore 新增 actions（syncToToday、toggleSynced、breakSync、uncompleteTodos、moveTodos、copyTodos）有对应测试
+- [x] usePomodoroStore 新增 actions（setDuration、setDayStartHour、setAutoStartBreak）有对应测试
+- [x] 工具函数 `isNewDay(hour)` 有测试覆盖
+- [x] 工具函数 `getDailyAvgFocus(records, days)` 有测试覆盖

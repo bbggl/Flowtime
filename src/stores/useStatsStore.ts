@@ -20,12 +20,13 @@ interface Summary {
 interface StatsState {
   granularity: GranularityType
   records: PomodoroRecord[]
-  selectedDate: string | null
+  selectedRange: { start: string; end: string } | null
 
   // Actions
   setGranularity: (g: GranularityType) => void
   setRecords: (records: PomodoroRecord[]) => void
-  setSelectedDate: (date: string | null) => void
+  setSelectedRange: (start: string, end: string) => void
+  clearSelectedRange: () => void
 
   // Computed
   getSummary: () => Summary
@@ -37,7 +38,7 @@ export const createStatsStore = () =>
   create<StatsState>((set, get) => ({
     granularity: Granularity.Week,
     records: [],
-    selectedDate: null,
+    selectedRange: null,
 
     setGranularity(g) {
       set({ granularity: g })
@@ -47,8 +48,13 @@ export const createStatsStore = () =>
       set({ records })
     },
 
-    setSelectedDate(date) {
-      set({ selectedDate: date })
+    setSelectedRange(start, end) {
+      const [s, e] = start > end ? [end, start] : [start, end]
+      set({ selectedRange: { start: s, end: e } })
+    },
+
+    clearSelectedRange() {
+      set({ selectedRange: null })
     },
 
     getSummary() {

@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import { useNavigate } from 'react-router-dom'
 import { usePomodoroStore, useTodoStore } from '../stores'
 import { useAuth } from '../hooks/useAuth'
-import { Timer, Bell, Volume2, LogOut, CheckSquare, ExternalLink, Info } from 'lucide-react'
+import { Sun, Timer, Bell, Volume2, LogOut, CheckSquare, ExternalLink, Info } from 'lucide-react'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -20,6 +20,10 @@ export default function Settings() {
   const notificationEnabled = useStore(usePomodoroStore, (s) => s.notificationEnabled)
   const setSoundEnabled = useStore(usePomodoroStore, (s) => s.setSoundEnabled)
   const setNotificationEnabled = useStore(usePomodoroStore, (s) => s.setNotificationEnabled)
+  const dayStartHour = useStore(usePomodoroStore, (s) => s.dayStartHour)
+  const autoStartBreak = useStore(usePomodoroStore, (s) => s.autoStartBreak)
+  const setDayStartHour = useStore(usePomodoroStore, (s) => s.setDayStartHour)
+  const setAutoStartBreak = useStore(usePomodoroStore, (s) => s.setAutoStartBreak)
 
   const workMin = workDuration / 60
   const shortBreakMin = shortBreakDuration / 60
@@ -102,6 +106,7 @@ export default function Settings() {
   // ── Notification settings (persisted to Supabase + localStorage) ──
   const toggleNotification = () => setNotificationEnabled(!notificationEnabled)
   const toggleSound = () => setSoundEnabled(!soundEnabled)
+  const toggleAutoStartBreak = () => setAutoStartBreak(!autoStartBreak)
 
   // ── Logout ──
   const handleLogout = async () => {
@@ -130,7 +135,57 @@ export default function Settings() {
         设置
       </h1>
 
-      {/* ── Section 1: 番茄设置 ── */}
+      {/* ── Section 1: 常规设置 ── */}
+      <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mb-6">
+        <h2 className={sectionHeader}>
+          <Sun className="w-5 h-5 text-primary dark:text-primary-dark" />
+          常规设置
+        </h2>
+
+        <div className="space-y-5">
+          {/* Day start hour */}
+          <div className={fieldWrapper}>
+            <label htmlFor="dayStartHour" className={labelClass}>
+              今日切换时间点（{dayStartHour}:00）
+            </label>
+            <input
+              id="dayStartHour"
+              type="range"
+              min={0}
+              max={7}
+              step={1}
+              value={dayStartHour}
+              onChange={(e) => setDayStartHour(Number(e.target.value))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-xs text-light-text-secondary dark:text-dark-text-secondary">
+              <span>0:00</span>
+              <span>7:00</span>
+            </div>
+          </div>
+
+          {/* Auto start break */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Timer className="w-5 h-5 text-light-text-secondary dark:text-dark-text-secondary" />
+              <span className="text-sm text-light-text dark:text-dark-text">
+                专注结束后自动开始休息
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoStartBreak}
+              onClick={toggleAutoStartBreak}
+              className={toggleTrack(autoStartBreak)}
+            >
+              <span className={toggleKnob(autoStartBreak)} />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Section 2: 番茄设置 ── */}
       <section className="bg-light-card dark:bg-dark-card rounded-xl border border-light-border dark:border-dark-border p-6 mb-6">
         <h2 className={sectionHeader}>
           <Timer className="w-5 h-5 text-primary dark:text-primary-dark" />

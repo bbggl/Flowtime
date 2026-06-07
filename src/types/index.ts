@@ -12,6 +12,7 @@ export interface Todo {
   sort_order: number
   created_at: string
   completed_at?: string
+  synced_from_id?: string
 }
 
 export interface PomodoroRecord {

@@ -29,4 +29,8 @@
     --color-light-border: #E4E2F4;
     --color-dark-border: #334155;
   }
+
+  body {
+    transition: background-color 150ms, color 150ms;
+  }
 }

@@ -42,16 +42,21 @@ describe('useStatsStore', () => {
     })
   })
 
-  describe('selectedDate', () => {
+  describe('selectedRange', () => {
     it('defaults to null', () => {
-      expect(store.getState().selectedDate).toBeNull()
+      expect(store.getState().selectedRange).toBeNull()
     })
 
-    it('can set and clear selected date', () => {
-      store.getState().setSelectedDate('2026-06-01')
-      expect(store.getState().selectedDate).toBe('2026-06-01')
-      store.getState().setSelectedDate(null)
-      expect(store.getState().selectedDate).toBeNull()
+    it('can set and clear selected range', () => {
+      store.getState().setSelectedRange('2026-06-01', '2026-06-03')
+      expect(store.getState().selectedRange).toEqual({ start: '2026-06-01', end: '2026-06-03' })
+      store.getState().clearSelectedRange()
+      expect(store.getState().selectedRange).toBeNull()
+    })
+
+    it('auto-swaps start and end when start > end', () => {
+      store.getState().setSelectedRange('2026-06-10', '2026-06-01')
+      expect(store.getState().selectedRange).toEqual({ start: '2026-06-01', end: '2026-06-10' })
     })
   })
 

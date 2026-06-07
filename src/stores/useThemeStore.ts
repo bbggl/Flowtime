@@ -4,8 +4,11 @@ type Theme = 'light' | 'dark'
 
 interface ThemeState {
   theme: Theme
+  sidebarExpanded: boolean
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
+  setSidebarExpanded: (expanded: boolean) => void
+  toggleSidebar: () => void
 }
 
 function getInitialTheme(): Theme {
@@ -13,6 +16,10 @@ function getInitialTheme(): Theme {
   if (stored === 'light' || stored === 'dark') return stored
   if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
   return 'light'
+}
+
+function getInitialSidebarExpanded(): boolean {
+  return localStorage.getItem('flowtime-sidebar-expanded') === 'true'
 }
 
 function applyTheme(theme: Theme) {
@@ -30,6 +37,7 @@ export const useThemeStore = create<ThemeState>((set, get) => {
 
   return {
     theme: initial,
+    sidebarExpanded: getInitialSidebarExpanded(),
 
     setTheme(theme) {
       localStorage.setItem('flowtime-theme', theme)
@@ -40,6 +48,16 @@ export const useThemeStore = create<ThemeState>((set, get) => {
     toggleTheme() {
       const next = get().theme === 'dark' ? 'light' : 'dark'
       get().setTheme(next)
+    },
+
+    setSidebarExpanded(expanded) {
+      localStorage.setItem('flowtime-sidebar-expanded', String(expanded))
+      set({ sidebarExpanded: expanded })
+    },
+
+    toggleSidebar() {
+      const next = !get().sidebarExpanded
+      get().setSidebarExpanded(next)
     },
   }
 })

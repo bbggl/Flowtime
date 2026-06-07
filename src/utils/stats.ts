@@ -11,11 +11,13 @@ export type Granularity = (typeof Granularity)[keyof typeof Granularity]
 
 /** Filter records to only the given time range for the specified granularity.
  *  When `referenceDate` is provided (YYYY-MM-DD), uses it as the reference point;
- *  otherwise defaults to "now". */
+ *  otherwise defaults to "now".
+ *  When `endDate` is provided, filters from referenceDate's unit to endDate's unit (inclusive). */
 export function filterByGranularity(
   records: PomodoroRecord[],
   granularity: Granularity,
   referenceDate?: string | null,
+  endDate?: string | null,
 ): PomodoroRecord[] {
   const now = referenceDate
     ? (([y, m, d]) => new Date(y, m - 1, d))(referenceDate.split('-').map(Number))
@@ -23,25 +25,42 @@ export function filterByGranularity(
   let start: Date
   let end: Date
 
+  const parseEnd = endDate
+    ? (([y, m, d]) => ({ y, m: m - 1, d }))(endDate.split('-').map(Number))
+    : null
+
   switch (granularity) {
     case Granularity.Day:
       start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      end = parseEnd
+        ? new Date(parseEnd.y, parseEnd.m, parseEnd.d + 1)
+        : new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
       break
     case Granularity.Week: {
       const day = now.getDay()
       const diff = now.getDate() - day + (day === 0 ? -6 : 1) // Monday
       start = new Date(now.getFullYear(), now.getMonth(), diff)
-      end = new Date(now.getFullYear(), now.getMonth(), diff + 7) // Next Monday
+      if (parseEnd) {
+        const eEndDate = new Date(parseEnd.y, parseEnd.m, parseEnd.d)
+        const eDay = eEndDate.getDay()
+        const eDiff = eEndDate.getDate() - eDay + (eDay === 0 ? 0 : 7) // Sunday
+        end = new Date(parseEnd.y, parseEnd.m, eDiff + 1) // Sunday + 1
+      } else {
+        end = new Date(now.getFullYear(), now.getMonth(), diff + 7) // Next Monday
+      }
       break
     }
     case Granularity.Month:
       start = new Date(now.getFullYear(), now.getMonth(), 1)
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+      end = parseEnd
+        ? new Date(parseEnd.y, parseEnd.m + 1, 1)
+        : new Date(now.getFullYear(), now.getMonth() + 1, 1)
       break
     case Granularity.Year:
       start = new Date(now.getFullYear(), 0, 1)
-      end = new Date(now.getFullYear() + 1, 0, 1)
+      end = parseEnd
+        ? new Date(parseEnd.y + 1, 0, 1)
+        : new Date(now.getFullYear() + 1, 0, 1)
       break
   }
 
@@ -50,6 +69,15 @@ export function filterByGranularity(
     d.setHours(0, 0, 0, 0)
     return d >= start && d < end
   })
+}
+
+/** Returns average focus time per day in seconds for the given number of days. */
+export function getDailyAvgFocus(records: PomodoroRecord[], days: number): number {
+  if (days <= 0 || records.length === 0) return 0
+  const totalFocusSecs = records
+    .filter((r) => r.mode === 'work' && r.status === 'completed')
+    .reduce((sum, r) => sum + r.actual_duration, 0)
+  return totalFocusSecs / days
 }
 
 export function calculateTotalFocusTime(records: PomodoroRecord[]): number {

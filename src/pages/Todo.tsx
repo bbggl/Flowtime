@@ -10,6 +10,9 @@ import {
   Check,
   X,
   Clock,
+  CheckSquare,
+  MoveRight,
+  Undo2,
 } from 'lucide-react'
 import { useTodoStore, usePomodoroStore } from '../stores'
 import { supabase } from '../lib/supabase'
@@ -20,7 +23,12 @@ import type { Todo } from '../types'
 // Helpers
 // ---------------------------------------------------------------------------
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const hour = parseInt(localStorage.getItem('flowtime-dayStartHour') || '0', 10)
+  const d = now.getHours() < hour
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+    : now
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六']
@@ -271,6 +279,16 @@ export default function Todo() {
   const selectedDate = useTodoStore((s) => s.selectedDate)
   const setSelectedDate = useTodoStore((s) => s.setSelectedDate)
 
+  // Multi-select
+  const isMultiSelectMode = useTodoStore((s) => s.isMultiSelectMode)
+  const selectedTodoIds = useTodoStore((s) => s.selectedTodoIds)
+  const toggleMultiSelectMode = useTodoStore((s) => s.toggleMultiSelectMode)
+  const toggleTodoSelection = useTodoStore((s) => s.toggleTodoSelection)
+  const syncToToday = useTodoStore((s) => s.syncToToday)
+  const uncompleteTodos = useTodoStore((s) => s.uncompleteTodos)
+  const moveTodos = useTodoStore((s) => s.moveTodos)
+  const copyTodos = useTodoStore((s) => s.copyTodos)
+
   // Mount 时从 Supabase 加载数据
   useEffect(() => {
     useTodoStore.getState().loadTodos()
@@ -294,9 +312,12 @@ export default function Todo() {
   const [editingCatName, setEditingCatName] = useState<string | null>(null)
   const [renameCatInput, setRenameCatInput] = useState('')
   // Delete confirmation
-  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string; hasCountdown: boolean } | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string; hasCountdown: boolean; hasSyncedCopies: boolean } | null>(null)
   // Pomodoro count picker
   const [pomoPickerId, setPomoPickerId] = useState<string | null>(null)
+
+  // Move/copy category picker for multi-select
+  const [moveCopyOpen, setMoveCopyOpen] = useState<'move' | 'copy' | null>(null)
 
   // --- Date helpers ---
   function isPastDate(dateStr: string): boolean {
@@ -469,7 +490,9 @@ export default function Todo() {
   const handleDelete = useCallback(
     (id: string, title: string) => {
       const hasCountdown = getCountdownIds().includes(id)
-      setDeleteConfirm({ id, title, hasCountdown })
+      const store = useTodoStore.getState()
+      const hasSyncedCopies = store.todos.some((t) => t.synced_from_id === id)
+      setDeleteConfirm({ id, title, hasCountdown, hasSyncedCopies })
     },
     [],
   )
@@ -502,7 +525,16 @@ export default function Todo() {
   // --- Render ---
   return (
     <>
-    <div className="flex flex-col h-full p-6">
+    <div
+      className="flex flex-col h-full p-6"
+      onClick={(e) => {
+        if (!isMultiSelectMode) return
+        const target = e.target as HTMLElement
+        // Don't exit if clicking on a todo item or interactive element
+        if (target.closest('[data-todo-item]') || target.closest('button') || target.closest('input')) return
+        toggleMultiSelectMode()
+      }}
+    >
       {/* Inline animation keyframes */}
       <style>{`
         @keyframes todoEnter {
@@ -550,7 +582,12 @@ export default function Todo() {
             return (
               <div key={cat.id} className="flex-shrink-0 group relative">
                 <button
-                  onClick={() => setCurrentCategory(cat.id)}
+                  onClick={() => {
+                    if (isMultiSelectMode && cat.id === 'today') {
+                      toggleMultiSelectMode()
+                    }
+                    setCurrentCategory(cat.id)
+                  }}
                   className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors min-w-[3rem] text-center
                     ${
                       currentCategory === cat.id
@@ -612,6 +649,22 @@ export default function Todo() {
             <Plus className="w-4 h-4" />
           </button>
         )}
+
+        {/* Multi-select toggle (hidden in today view) */}
+        {!isTodayView && (
+          <div className="ml-auto flex-shrink-0">
+            <button
+              onClick={toggleMultiSelectMode}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                isMultiSelectMode
+                  ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
+                  : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50 border border-light-border dark:border-dark-border'
+              }`}
+            >
+              {isMultiSelectMode ? '取消' : '多选'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ================================================================ */}
@@ -640,7 +693,7 @@ export default function Todo() {
       {/* ================================================================ */}
       {/* Task list                                                         */}
       {/* ================================================================ */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-1 px-1">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden -mx-1 px-1 py-0.5">
         {displayTodos.length === 0 ? (
           /* ---- Empty state ---- */
           <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -662,6 +715,7 @@ export default function Todo() {
               const isDeleting = deletingIds.has(todo.id)
               const isEntering = enteringIds.has(todo.id)
               const meta = PRIORITY_META[todo.priority]
+              const isSelected = selectedTodoIds.has(todo.id)
 
               return (
                 <div
@@ -669,12 +723,22 @@ export default function Todo() {
                   data-todo-item
                   data-todo-id={todo.id}
                   data-todo-display-idx={displayIdx}
+                  onClick={() => {
+                    if (isTodayView) return
+                    if (!isMultiSelectMode) {
+                      toggleMultiSelectMode()
+                    }
+                    toggleTodoSelection(todo.id)
+                  }}
                   className={`group relative flex flex-col gap-1.5 pl-10 pr-4 py-3 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border transition-shadow hover:shadow-sm transition-transform duration-200 ease-out
                     ${isEntering ? 'todo-enter' : ''}
                     ${isDeleting ? 'todo-leave' : ''}
+                    ${isMultiSelectMode ? 'cursor-pointer' : ''}
+                    ${isMultiSelectMode && isSelected ? 'ring-2 ring-primary dark:ring-primary-dark' : ''}
                   `}
                 >
-                  {/* Drag handle */}
+                  {/* Drag handle (hidden in multi-select mode) */}
+                  {!isMultiSelectMode && (
                   <div
                     onMouseDown={(e) => {
                       e.preventDefault()
@@ -800,12 +864,17 @@ export default function Todo() {
                       <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
                     </svg>
                   </div>
+                  )}
 
                   {/* Top row: checkbox + title + inline actions */}
                   <div className="flex items-center gap-3">
                     {/* Checkbox */}
                     <button
                       onClick={() => {
+                        if (isMultiSelectMode) {
+                          toggleTodoSelection(todo.id)
+                          return
+                        }
                         if (todoDropRef.current) { todoDropRef.current = false; return }
                         toggleTodo(todo.id)
                       }}
@@ -974,16 +1043,150 @@ export default function Todo() {
       )}
     </div>
 
+    {/* Multi-select bottom action bar */}
+    {isMultiSelectMode && (
+      <div className={`fixed bottom-0 z-50 flex items-center justify-between px-6 py-3 bg-light-card dark:bg-dark-card border-t border-light-border dark:border-dark-border shadow-lg transition-all ${
+        (() => { try { return JSON.parse(localStorage.getItem('flowtime-sidebar-expanded') || 'false') } catch { return false } })() ? 'left-44' : 'left-16'
+      } right-0`}>
+        <span className="text-sm font-medium text-light-text dark:text-dark-text">
+          已选 {selectedTodoIds.size} 项
+        </span>
+          <div className="flex items-center gap-2">
+            {/* 同步到今天 */}
+            <button
+              onClick={() => {
+                const ids = Array.from(selectedTodoIds)
+                if (ids.length === 0) return
+                syncToToday(ids)
+              }}
+              disabled={selectedTodoIds.size === 0}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 dark:bg-primary-dark/10 text-primary dark:text-primary-dark hover:bg-primary/20 dark:hover:bg-primary-dark/20 disabled:opacity-40 transition-colors"
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              同步到今天
+            </button>
+
+            {/* 取消完成 */}
+            <button
+              onClick={() => {
+                const ids = Array.from(selectedTodoIds)
+                if (ids.length === 0) return
+                uncompleteTodos(ids)
+              }}
+              disabled={selectedTodoIds.size === 0}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-light-border/50 dark:bg-dark-border/50 text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border dark:hover:bg-dark-border disabled:opacity-40 transition-colors"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              取消完成
+            </button>
+
+            {/* 移动/复制到 */}
+            <div className="relative">
+              <button
+                onClick={() => setMoveCopyOpen(moveCopyOpen ? null : 'move')}
+                disabled={selectedTodoIds.size === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-light-border/50 dark:bg-dark-border/50 text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border dark:hover:bg-dark-border disabled:opacity-40 transition-colors"
+              >
+                <MoveRight className="w-3.5 h-3.5" />
+                移动/复制到
+              </button>
+
+              {moveCopyOpen && (
+                <div className="absolute bottom-full right-0 mb-2 p-2 rounded-xl bg-light-card dark:bg-dark-card border border-light-border dark:border-dark-border shadow-xl min-w-[160px]">
+                  <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary px-2 py-1 mb-1">
+                    选择目标分类
+                  </p>
+                  <div className="flex flex-col gap-0.5 max-h-40 overflow-y-auto mb-2">
+                    {categories
+                      .filter((c) => c.type !== 'readonly' && c.id !== currentCategory && c.id !== 'today')
+                      .map((cat) => (
+                        <div key={cat.id} className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              if (moveCopyOpen === 'move') {
+                                moveTodos(Array.from(selectedTodoIds), cat.id)
+                              } else {
+                                copyTodos(Array.from(selectedTodoIds), cat.id)
+                              }
+                              setMoveCopyOpen(null)
+                            }}
+                            className="flex-1 text-left px-2 py-1 rounded-lg text-xs text-light-text dark:text-dark-text hover:bg-light-border/50 dark:hover:bg-dark-border/50 transition-colors"
+                          >
+                            {cat.name}
+                          </button>
+                        </div>
+                      ))}
+                    {categories.filter((c) => c.type !== 'readonly' && c.id !== currentCategory && c.id !== 'today').length === 0 && (
+                      <p className="text-xs text-light-text-secondary/60 dark:text-dark-text-secondary/60 px-2 py-1">
+                        无可用分类
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 pt-1 border-t border-light-border dark:border-dark-border">
+                    <button
+                      onClick={() => setMoveCopyOpen('move')}
+                      className={`flex-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        moveCopyOpen === 'move'
+                          ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
+                          : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'
+                      }`}
+                    >
+                      移动
+                    </button>
+                    <button
+                      onClick={() => setMoveCopyOpen('copy')}
+                      className={`flex-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        moveCopyOpen === 'copy'
+                          ? 'bg-primary text-white dark:bg-primary-dark dark:text-white'
+                          : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50'
+                      }`}
+                    >
+                      复制
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 取消 */}
+            <button
+              onClick={toggleMultiSelectMode}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border/50 dark:hover:bg-dark-border/50 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+              取消
+            </button>
+          </div>
+        </div>
+    )}
+
     {/* Delete confirmation */}
     <ConfirmDialog
       isOpen={deleteConfirm !== null}
       title="删除待办"
       message={
-        deleteConfirm?.hasCountdown
-          ? `确定要删除待办「${deleteConfirm?.title ?? ''}」吗？\n\n⚠️ 该待办已绑定倒计时，删除后将同时移除倒计时。\n\n此操作不可恢复。`
-          : `确定要删除待办「${deleteConfirm?.title ?? ''}」吗？\n\n此操作不可恢复。`
+        (() => {
+          const base = `确定要删除待办「${deleteConfirm?.title ?? ''}」吗？`
+          const warnings: string[] = []
+          if (deleteConfirm?.hasCountdown) {
+            warnings.push('⚠️ 该待办已绑定倒计时，删除后将同时移除倒计时')
+          }
+          if (deleteConfirm?.hasSyncedCopies) {
+            warnings.push('⚠️ 该待办已同步到今天，删除后将同时删除今天中的同步副本')
+          }
+          if (warnings.length > 0) {
+            return `${base}\n\n${warnings.join('\n')}\n\n此操作不可恢复。`
+          }
+          return `${base}\n\n此操作不可恢复。`
+        })()
       }
-      confirmLabel={deleteConfirm?.hasCountdown ? '确认删除（含倒计时）' : '确认删除'}
+      confirmLabel={
+        deleteConfirm?.hasSyncedCopies
+          ? '确认删除（含同步副本）'
+          : deleteConfirm?.hasCountdown
+            ? '确认删除（含倒计时）'
+            : '确认删除'
+      }
       onConfirm={() => {
         if (deleteConfirm) {
           if (deleteConfirm.hasCountdown) {

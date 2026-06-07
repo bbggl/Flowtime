@@ -358,11 +358,11 @@
 系统 SHALL 以 Supabase 作为后端，所有数据按 `user_id` 隔离，支持 Realtime 跨设备同步。
 
 #### 数据库表
-- **todos**: id, user_id, title, description, status, priority, category, date, estimated_pomos, completed_pomos, created_at, completed_at
+- **todos**: id, user_id, title, description, status, priority, category, date, estimated_pomos, completed_pomos, sort_order, synced_from_id, created_at, completed_at
 - **pomodoro_records**: id, user_id, mode, task_id, duration, actual_duration, status, started_at, completed_at
 - **notes**: id, user_id, title, content, tags, created_at, updated_at
 - **categories**: id, user_id, name, type, created_at
-- **user_settings**: id, user_id, daily_goal, work_duration, short_break_duration, long_break_duration, long_break_interval, sound_enabled, notification_enabled, greeting_text, countdown_todo_ids
+- **user_settings**: id, user_id, daily_goal, work_duration, short_break_duration, long_break_duration, long_break_interval, sound_enabled, notification_enabled, greeting_text, countdown_todo_ids, day_start_hour, auto_start_break
 
 #### Scenario: 离线降级
 - **WHEN** 网络不可用
@@ -370,11 +370,154 @@
 
 ---
 
+---
+
+### Requirement: 待办多选与同步
+系统 SHALL 在非"今天"分类的待办页面右上角提供多选按钮，支持批量同步到今天、取消完成、移动/复制到其他分类。
+
+#### 数据模型
+`Todo` 类型新增 `synced_from_id?: string` 字段，指向源待办 ID，标识当前是关联副本。
+
+#### Scenario: 多选模式入口
+- **WHEN** 用户在非"今天"分类页面
+- **THEN** 右上角显示"多选"按钮
+- **WHEN** 用户点击多选按钮
+- **THEN** 进入多选模式，每个待办出现可选勾选框，底部出现操作栏
+- **AND** 选中的待办边缘高亮（ring-2 ring-primary）
+
+#### Scenario: 退出多选模式
+- **WHEN** 用户再次点击右上角按钮或点击取消
+- **THEN** 退出多选模式，所有选中状态清除
+
+#### Scenario: 同步到今天
+- **WHEN** 用户选中待办并点击"同步到今天"
+- **THEN** 在"今天"分类下创建关联副本，`synced_from_id` 指向原待办，`category='today'`
+- **AND** 原分类下的待办保留不变
+
+#### Scenario: 关联副本状态同步
+- **WHEN** 关联副本的完成状态发生变化
+- **THEN** 对应的源待办同步更新完成状态，反之亦然
+
+#### Scenario: 次日断开同步
+- **WHEN** 系统时间到达"日期切换时间点"（由设置 `day_start_hour` 决定）
+- **THEN** 所有 `category='today'` 且 `synced_from_id` 不为空的待办的 `synced_from_id` 被置空
+- **AND** 关联副本和源待办各自独立
+
+#### Scenario: 批量取消完成
+- **WHEN** 用户选中已完成的待办并点击"取消完成"
+- **THEN** 选中待办的 `status` 变为 `'pending'`，`completed_at` 置空
+- **AND** 未完成的待办不受影响
+
+#### Scenario: 移动/复制到其他分类
+- **WHEN** 用户在"今天"分类下选中 `synced_from_id` 不为空的待办，或在非只读分类下选中普通待办，点击"移动/复制到"
+- **THEN** 弹出分类选择器
+- **AND** 选择移动：待办 `category` 变更为目标分类
+- **AND** 选择复制：在目标分类下创建副本（新 ID，不保留 synced_from_id）
+
+---
+
+### Requirement: 番茄钟按钮合并
+系统 SHALL 将番茄钟页面的短休息和长休息按钮合并为一个"休息"按钮，显示短休息时长。
+
+#### Scenario: 休息按钮默认行为
+- **WHEN** 用户查看番茄钟页面
+- **THEN** 仅显示两个模式按钮：专注 | 休息
+- **AND** 休息按钮显示短休息时长（从设置读取）
+
+#### Scenario: 长休息提醒确认
+- **WHEN** 完成 N 个专注后（N = long_break_interval），长休息提醒弹窗弹出
+- **AND** 用户点击确认
+- **THEN** 自动切换到长休息时长并开始计时
+- **AND** 休息按钮暂时显示长休息时长
+
+#### Scenario: 长休息结束后恢复
+- **WHEN** 长休息计时结束
+- **THEN** 休息按钮时长自动切回短休息时长
+
+#### Scenario: 拒绝长休息
+- **WHEN** 长休息提醒弹窗弹出
+- **AND** 用户取消或忽略
+- **THEN** 不进入长休息，继续正常流程，可按休息按钮开始短休息
+
+---
+
+### Requirement: 侧边栏展开
+系统 SHALL 提供手动展开/收起侧边栏的功能，展开时显示每个模块的标题。
+
+#### Scenario: 展开/收起切换
+- **WHEN** 用户点击侧边栏底部的展开/收起按钮（ChevronLeft/ChevronRight 图标）
+- **THEN** 侧边栏在 64px（收起）和约 180px（展开）之间切换
+- **AND** 展开态显示图标 + 文字标题
+
+#### Scenario: 展开状态持久化
+- **WHEN** 用户切换展开/收起状态
+- **THEN** 状态写入 localStorage
+- **AND** 刷新页面后保持上次状态
+
+---
+
+### Requirement: 点击计时数字修改预设时长
+系统 SHALL 支持在番茄钟页面点击计时数字直接修改当前模式的预设时长，并同步到设置。
+
+#### Scenario: 点击数字弹出编辑器
+- **WHEN** 用户点击番茄钟页面中央的计时数字（如 25:00）
+- **THEN** 数字进入编辑模式（ring-2 ring-primary 高亮），鼠标滚轮可调整分钟数
+- **WHEN** 用户选择新时长（滚轮调整）
+- **THEN** 更新当前模式预设时长
+- **AND** 同步更新设置页对应字段
+- **AND** 持久化到 Supabase `user_settings`
+- **WHEN** 用户点击外部区域
+- **THEN** 退出编辑模式
+
+#### Scenario: 运行时修改不影响当前计时
+- **WHEN** 计时器正在运行中
+- **AND** 用户点击数字修改时长
+- **THEN** 当前倒计时不受影响
+- **AND** 修改仅影响下次开始该模式的时长
+
+---
+
+### Requirement: 统计页日均专注时长
+系统 SHALL 在统计页总专注时长卡片后新增日均专注时长卡片。
+
+#### Scenario: 日均专注显示
+- **WHEN** 用户查看统计页
+- **THEN** 在"总专注时长"后面显示"日均专注时长"卡片
+- **AND** 根据当前粒度和时间范围计算日均值
+- **AND** 格式为 X小时X分钟
+
+---
+
 ## MODIFIED Requirements
-无（全新项目）
+
+### Requirement: 设置页（修改）
+系统 SHALL 提供设置页面，在原有基础上新增日期切换时间点和自动休息开关。
+
+#### Scenario: 日期切换时间点设置
+- **WHEN** 用户打开设置 → 常规设置区域
+- **THEN** 可设置"今日切换时间点"，范围 0:00 ~ 7:00（每小时一档），默认 0:00
+- **AND** 该值决定"今天"分类的日期判定边界和待办同步断开时间
+- **AND** 修改即时生效，持久化到 Supabase `user_settings.day_start_hour`
+
+#### Scenario: 自动开始休息设置
+- **WHEN** 用户打开设置 → 番茄钟设置区域
+- **THEN** 可开关"专注结束后自动开始休息"，默认关闭
+- **AND** 开启后，专注计时结束时自动进入休息模式并开始计时
+- **AND** 修改即时生效，持久化到 Supabase `user_settings.auto_start_break`
+
+### Requirement: 番茄钟计时器（修改）
+系统 SHALL 修改为仅显示专注/休息两个模式按钮。休息按钮行为见"番茄钟按钮合并"需求。
+
+#### 数据库变更
+`user_settings` 表新增字段：
+- `day_start_hour`: integer，默认 0，范围 0-7
+- `auto_start_break`: boolean，默认 false
+
+`todos` 表新增字段：
+- `synced_from_id`: text，nullable，指向源待办 ID
 
 ## REMOVED Requirements
-无（全新项目）
+无
 
 ---
 

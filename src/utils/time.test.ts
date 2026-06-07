@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatTime, getProgress, getNextMode } from './time'
+import { formatTime, getProgress, getNextMode, isNewDay } from './time'
 
 describe('formatTime', () => {
   it('formats 0 seconds as 00:00', () => {
@@ -58,5 +58,37 @@ describe('getNextMode', () => {
 
   it('returns work after long_break', () => {
     expect(getNextMode('long_break', 4, 4)).toBe('work')
+  })
+})
+
+describe('isNewDay', () => {
+  it('dayStartHour=0, lastDate is yesterday, now is 00:30 → true (new day)', () => {
+    const lastDate = '2026-01-14'
+    const now = new Date(2026, 0, 15, 0, 30)
+    expect(isNewDay(0, lastDate, now)).toBe(true)
+  })
+
+  it('dayStartHour=3, lastDate is yesterday, now is 02:30 → false (still yesterday)', () => {
+    const lastDate = '2026-01-14'
+    const now = new Date(2026, 0, 15, 2, 30)
+    expect(isNewDay(3, lastDate, now)).toBe(false)
+  })
+
+  it('dayStartHour=3, lastDate is yesterday, now is 03:30 → true (new day)', () => {
+    const lastDate = '2026-01-14'
+    const now = new Date(2026, 0, 15, 3, 30)
+    expect(isNewDay(3, lastDate, now)).toBe(true)
+  })
+
+  it('dayStartHour=7, lastDate is yesterday, now is 06:59 → false', () => {
+    const lastDate = '2026-01-14'
+    const now = new Date(2026, 0, 15, 6, 59)
+    expect(isNewDay(7, lastDate, now)).toBe(false)
+  })
+
+  it('dayStartHour=7, lastDate is yesterday, now is 07:00 → true', () => {
+    const lastDate = '2026-01-14'
+    const now = new Date(2026, 0, 15, 7, 0)
+    expect(isNewDay(7, lastDate, now)).toBe(true)
   })
 })

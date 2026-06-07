@@ -209,12 +209,9 @@ export default function Stats() {
 
   // 响应式同步番茄记录变化
   useEffect(() => {
-    const unsub = usePomodoroStore.subscribe(
-      (s) => s.records,
-      (records) => {
-        useStatsStore.getState().setRecords(records)
-      },
-    )
+    const unsub = usePomodoroStore.subscribe((state) => {
+      useStatsStore.getState().setRecords(state.records)
+    })
     return unsub
   }, [])
 

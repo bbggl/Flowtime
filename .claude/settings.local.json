@@ -47,7 +47,12 @@
       "mcp__plugin_playwright_playwright__browser_wait_for",
       "mcp__plugin_playwright_playwright__browser_run_code_unsafe",
       "Bash(ls -la \"D:/1/develop/easy-vibe/\" 2>/dev/null || echo \"目录不存在\")",
-      "Read(//d/1/develop/easy-vibe/**)"
+      "Read(//d/1/develop/easy-vibe/**)",
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "PowerShell(npx vitest run 2>&1)",
+      "PowerShell(npx vite build 2>&1)",
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "PowerShell(git add src/pages/Pomodoro.tsx src/pages/Settings.tsx src/pages/Todo.tsx src/stores/index.ts src/stores/usePomodoroStore.ts src/stores/usePomodoroStore.test.ts src/stores/useTodoStore.ts src/hooks/usePomodoroTimer.test.ts)"
     ]
   },
   "enableAllProjectMcpServers": true,

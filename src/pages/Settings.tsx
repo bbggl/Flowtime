@@ -55,6 +55,8 @@ export default function Settings() {
   const categories = useStore(useTodoStore, (s) => s.categories)
   const urgencySortEnabled = useStore(useTodoStore, (s) => s.urgencySortEnabled)
   const setUrgencySortEnabled = useTodoStore((s) => s.setUrgencySortEnabled)
+  const completedToBottom = useStore(useTodoStore, (s) => s.completedToBottom)
+  const setCompletedToBottom = useTodoStore((s) => s.setCompletedToBottom)
 
   // Only real categories (today + custom), not readonly views (全部/计划中/已完成)
   const selectableCategories = useMemo(
@@ -110,6 +112,7 @@ export default function Settings() {
   const toggleSound = () => setSoundEnabled(!soundEnabled)
   const toggleAutoStartBreak = () => setAutoStartBreak(!autoStartBreak)
   const toggleUrgencySort = () => setUrgencySortEnabled(!urgencySortEnabled)
+  const toggleCompletedToBottom = () => setCompletedToBottom(!completedToBottom)
 
   // ── Logout ──
   const handleLogout = async () => {
@@ -404,6 +407,28 @@ export default function Settings() {
           {urgencySortEnabled && (
             <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary">
               开启后，待办按紧急程度（高→中→低）排列，拖动排序仅限同优先级内
+            </p>
+          )}
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-light-text dark:text-dark-text">
+                已完成待办自动排到底部
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={completedToBottom}
+              onClick={toggleCompletedToBottom}
+              className={toggleTrack(completedToBottom)}
+            >
+              <span className={toggleKnob(completedToBottom)} />
+            </button>
+          </div>
+          {completedToBottom && (
+            <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary">
+              开启后，已完成的待办自动排列在未完成待办的下方
             </p>
           )}
         </div>

@@ -870,7 +870,8 @@ export default function Todo() {
                   <div className="flex items-center gap-3">
                     {/* Checkbox */}
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         if (isMultiSelectMode) {
                           toggleTodoSelection(todo.id)
                           return

@@ -90,6 +90,10 @@ interface TodoState {
   // Urgency sort
   urgencySortEnabled: boolean
   setUrgencySortEnabled: (enabled: boolean) => void
+
+  // Completed to bottom
+  completedToBottom: boolean
+  setCompletedToBottom: (enabled: boolean) => void
 }
 
 let idCounter = 0
@@ -119,6 +123,9 @@ export const createTodoStore = (supabase: SupabaseClient) => {
     dayStartHour: 0,
     urgencySortEnabled: (() => {
       try { return localStorage.getItem('flowtime-urgency-sort') === 'true' } catch { return false }
+    })(),
+    completedToBottom: (() => {
+      try { return localStorage.getItem('flowtime-completed-bottom') === 'true' } catch { return false }
     })(),
 
     // ---- Load from Supabase (with offline fallback) ----
@@ -786,8 +793,13 @@ export const createTodoStore = (supabase: SupabaseClient) => {
       try { localStorage.setItem('flowtime-urgency-sort', String(enabled)) } catch { /* ignore */ }
     },
 
+    setCompletedToBottom(enabled) {
+      set({ completedToBottom: enabled })
+      try { localStorage.setItem('flowtime-completed-bottom', String(enabled)) } catch { /* ignore */ }
+    },
+
     getFilteredTodos() {
-      const { todos, currentCategory, selectedDate, urgencySortEnabled } = get()
+      const { todos, currentCategory, selectedDate, urgencySortEnabled, completedToBottom } = get()
       let filtered: Todo[]
       switch (currentCategory) {
         case 'today': {
@@ -815,6 +827,14 @@ export const createTodoStore = (supabase: SupabaseClient) => {
           const p = priorityOrder[a.priority] - priorityOrder[b.priority]
           if (p !== 0) return p
           return a.sort_order - b.sort_order
+        })
+      }
+
+      // 已完成排到底部：pending 在前，done 在后（保持各自组内原有顺序）
+      if (completedToBottom && currentCategory !== 'completed') {
+        filtered = [...filtered].sort((a, b) => {
+          if (a.status === b.status) return 0
+          return a.status === 'done' ? 1 : -1
         })
       }
 
